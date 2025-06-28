@@ -13,6 +13,7 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+chroma_db/
 develop-eggs/
 researchagents/
 dist/

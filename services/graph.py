@@ -4,7 +4,7 @@ from langchain_core.tools import tool
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.checkpoint.memory import MemorySaver
-from vector_store import get_research_vectorstore
+from utils.vector_store import get_research_vectorstore
 from typing import TypedDict, Annotated
 import re
 

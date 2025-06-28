@@ -3,8 +3,9 @@ from typing import Dict, Any
 import uvicorn
 import json
 import os
-from graph import create_research_graph
-from vector_store import initialize_vector_store
+from services.graph import create_research_graph
+from utils.vector_store import initialize_vector_store
+from utils.promptmanager import load_prompts_data, get_prompt_for_request
 from models import ResearchRequest, ResearchResponse
 
 app = FastAPI(title="Equity Research Agent API with ChromaDB", version="1.0.0")
@@ -22,39 +23,7 @@ async def startup_event():
         print(f"❌ Error initializing vector store: {e}")
 
 # Load prompts data
-def load_prompts_data():
-    """Load the prompts configuration from JSON file"""
-    try:
-        prompts_path = os.path.join(os.path.dirname(__file__), "Prompts.json")
-        with open(prompts_path, 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Error loading prompts: {e}")
-        return []
-
 PROMPTS_DATA = load_prompts_data()
-
-def get_prompt_for_request(company_code: str, sector_code: str, report_type: str) -> str:
-    """Get the specific prompt for the given parameters"""
-    # Search for matching prompt in the data
-    for prompt_config in PROMPTS_DATA:
-        if (prompt_config.get("CompanyCode") == company_code and 
-            prompt_config.get("SectorCode") == sector_code and 
-            prompt_config.get("ReportType") == report_type):
-            
-            prompt = prompt_config.get("Prompt", "No specific prompt found")
-            print(f"✅ Found matching prompt for {company_code}-{sector_code}-{report_type}")
-            return prompt
-    
-    # If no exact match found, return a generic prompt
-    generic_prompt = f"""You are an expert equity research analyst. Generate a comprehensive {report_type} 
-    for {company_code} in the {sector_code} sector. Provide professional analysis including company overview, 
-    financial performance, market position, risks, and investment recommendation."""
-    
-    print(f"⚠️ No specific prompt found, using generic prompt for {company_code}-{sector_code}-{report_type}")
-    return generic_prompt
-
-# Pydantic models for request/response - moved to models/ package
 
 # Initialize the graph
 research_graph = create_research_graph()
@@ -70,12 +39,12 @@ async def research_query(request: ResearchRequest):
     """
     try:
         config = {"configurable": {"thread_id": request.thread_id}}
-        
-        # Get the specific prompt for this request
+          # Get the specific prompt for this request
         specific_prompt = get_prompt_for_request(
             request.company_code, 
             request.sector_code, 
-            request.report_type
+            request.report_type,
+            PROMPTS_DATA
         )
           # Run the graph with the specific prompt and request parameters
         final_result = None
