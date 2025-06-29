@@ -14,6 +14,8 @@ class ResearchState(TypedDict):
     company_code: str
     sector_code: str
     report_type: str
+    quarter: str
+    year: int
     research_context: str
     first_cut_report: str
     feedback: str
@@ -26,15 +28,17 @@ def initialize_research(state):
     company_code = state.get("company_code", "")
     sector_code = state.get("sector_code", "")
     report_type = state.get("report_type", "")
+    quarter = state.get("quarter", "")
+    year = state.get("year", "")
     
-    print(f"DEBUG: initialize_research - Company: {company_code}, Sector: {sector_code}, Report: {report_type}")
+    print(f"DEBUG: initialize_research - Company: {company_code}, Sector: {sector_code}, Report: {report_type}, Quarter: {quarter}, Year: {year}")
     
-    # Get relevant context from ChromaDB
-    vectorstore = get_research_vectorstore()
+    # Get relevant context from ChromaDB using quarter-specific vector store
+    vectorstore = get_research_vectorstore(company_code, quarter, year)
     context = ""
     
     if company_code and company_code != "UNKNOWN":
-        print(f"DEBUG: Retrieving context for company: {company_code}")
+        print(f"DEBUG: Retrieving context for company: {company_code} from collection: {vectorstore.collection_name}")
         context = vectorstore.get_context_for_company(company_code)
         print(f"DEBUG: Retrieved context length: {len(context)} characters")
     
@@ -43,6 +47,8 @@ def initialize_research(state):
         "company_code": company_code,
         "sector_code": sector_code,
         "report_type": report_type,
+        "quarter": quarter,
+        "year": year,
         "research_context": context,
         "first_cut_report": "",
         "feedback": "",
@@ -120,12 +126,13 @@ Base your analysis on the research context provided above.
     user_message = HumanMessage(content=user_request)
     response = model.invoke([system_message, user_message])
     report_content = response.content
-    
-    updated_state = {
+      updated_state = {
         "messages": state["messages"],
         "company_code": company_code,
         "sector_code": state.get("sector_code", ""),
         "report_type": state.get("report_type", ""),
+        "quarter": state.get("quarter", ""),
+        "year": state.get("year", ""),
         "research_context": context,
         "analyst_iterations": iterations + 1
     }
@@ -198,12 +205,13 @@ Provide actionable suggestions for improvement.
     feedback_content = response.content
     
     print(f"DEBUG: Generated feedback for first cut report")
-    
-    return {
+      return {
         "messages": state["messages"],
         "company_code": company_code,
         "sector_code": state.get("sector_code", ""),
         "report_type": state.get("report_type", ""),
+        "quarter": state.get("quarter", ""),
+        "year": state.get("year", ""),
         "research_context": context,
         "first_cut_report": first_cut_report,
         "feedback": feedback_content,

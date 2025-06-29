@@ -3,7 +3,7 @@ from typing import Dict, Any
 import uvicorn
 import json
 import os
-from services.graph import create_research_graph
+from graphs.reportgraph import create_research_graph
 from utils.vector_store import initialize_vector_store
 from utils.promptmanager import load_prompts_data, get_prompt_for_request
 from models import ResearchRequest, ResearchResponse
@@ -16,9 +16,10 @@ async def startup_event():
     """Initialize the vector store when the API starts"""
     print("🚀 Initializing Equity Research API with ChromaDB...")
     try:
+        # Initialize default vector store
         vectorstore = initialize_vector_store()
         stats = vectorstore.get_collection_stats()
-        print(f"✅ Vector store initialized: {stats}")
+        print(f"✅ Default vector store initialized: {stats}")
     except Exception as e:
         print(f"❌ Error initializing vector store: {e}")
 
@@ -28,9 +29,7 @@ PROMPTS_DATA = load_prompts_data()
 # Initialize the graph
 research_graph = create_research_graph()
 
-@app.get("/")
-async def root():
-    return {"message": "Research Agent API is running!"}
+ 
 
 @app.post("/research", response_model=ResearchResponse)
 async def research_query(request: ResearchRequest):
@@ -48,14 +47,15 @@ async def research_query(request: ResearchRequest):
         )
           # Run the graph with the specific prompt and request parameters
         final_result = None
-        
-        # Use stream_mode="values" to get the final state values
+          # Use stream_mode="values" to get the final state values
         for state in research_graph.stream(
             {
                 "messages": [("user", specific_prompt)],
                 "company_code": request.company_code,
                 "sector_code": request.sector_code,
-                "report_type": request.report_type
+                "report_type": request.report_type,
+                "quarter": request.quarter,
+                "year": request.year
             }, 
             config,
             stream_mode="values"
