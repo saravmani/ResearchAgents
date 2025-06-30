@@ -8,6 +8,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from typing import List, Dict, Any
 import logging
+from .pdftomarkdown import PDFToMarkdownConverter
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -35,20 +36,23 @@ class ResearchVectorStore:
         self.embeddings = SentenceTransformerEmbeddings(
             model_name="all-MiniLM-L6-v2"
         )
-        
-        # Initialize ChromaDB
+          # Initialize ChromaDB
         self.client = chromadb.PersistentClient(path=persist_directory)
+        
+        # Initialize PDF converter
+        self.pdf_converter = PDFToMarkdownConverter()
         
         # Initialize Chroma vector store with LangChain-compatible embedding function
         self.vectorstore = Chroma(
             client=self.client,
             collection_name=self.collection_name,
-            embedding_function=self.embeddings,
-        )
+            embedding_function=self.embeddings,        )
         
         logger.info(f"ChromaDB initialized at {persist_directory} with collection: {self.collection_name}")
+    
     def load_documents_from_directory(self, docs_path: str) -> List[Document]:
-        """Load and split documents from the structured directory (year/quarter/company)"""
+        """Load and split documents from the structured directory (year/quarter/company)
+        Supports both Markdown (.md) and PDF (.pdf) files"""
         try:
             # If specific company/quarter/year is set, load from that specific path
             if self.company_code and self.quarter and self.year:
@@ -60,14 +64,21 @@ class ResearchVectorStore:
                     logger.warning(f"Specific path not found: {specific_path}")
                     return []
             
-            # Load markdown files recursively
+            # First, check for and process any PDF files
+            self._process_pdf_files_in_directory(docs_path)
+            
+            # Load markdown files recursively (including converted PDFs)
             loader = DirectoryLoader(
                 docs_path, 
-                glob="**/*.md",  # Recursive search
+                glob="**/*.md",  # Recursive search for markdown files
                 loader_cls=TextLoader,
                 loader_kwargs={"encoding": "utf-8"}
             )
             documents = loader.load()
+            
+            if not documents:
+                logger.warning(f"No markdown documents found in {docs_path}")
+                return []
             
             # Split documents into chunks
             text_splitter = RecursiveCharacterTextSplitter(
@@ -81,6 +92,9 @@ class ResearchVectorStore:
             # Add metadata extracted from folder structure
             for doc in split_docs:
                 source_path = doc.metadata.get('source', '')
+                
+                # Check if this is a converted PDF
+                is_pdf_converted = '_converted.md' in os.path.basename(source_path)
                 
                 # Extract year, quarter, and company from path structure
                 # Expected structure: docs/YYYY/QX/COMPANY/filename.md
@@ -116,7 +130,13 @@ class ResearchVectorStore:
                     doc.metadata['year'] = self.year
                 
                 # Add additional metadata
-                doc.metadata['document_type'] = 'research_report'
+                if is_pdf_converted:
+                    doc.metadata['document_type'] = 'pdf_converted'
+                    doc.metadata['original_type'] = 'pdf'
+                else:
+                    doc.metadata['document_type'] = 'research_report'
+                    doc.metadata['original_type'] = 'markdown'
+                
                 doc.metadata['source_file'] = os.path.basename(source_path)
                 
                 logger.debug(f"Processed document: {doc.metadata}")
@@ -127,6 +147,55 @@ class ResearchVectorStore:
         except Exception as e:
             logger.error(f"Error loading documents: {e}")
             return []
+    
+    def _process_pdf_files_in_directory(self, docs_path: str):
+        """Process any PDF files found in the directory and convert them to markdown"""
+        try:
+            # Find all PDF files recursively
+            pdf_files = []
+            for root, dirs, files in os.walk(docs_path):
+                for file in files:
+                    if file.lower().endswith('.pdf'):
+                        pdf_files.append(os.path.join(root, file))
+            
+            if not pdf_files:
+                logger.debug(f"No PDF files found in {docs_path}")
+                return
+            
+            logger.info(f"Found {len(pdf_files)} PDF files to process in {docs_path}")
+            
+            # Process each PDF file
+            for pdf_path in pdf_files:
+                try:
+                    # Check if markdown version already exists
+                    expected_md_path = pdf_path.replace('.pdf', '_converted.md')
+                    
+                    if os.path.exists(expected_md_path):
+                        # Check if PDF is newer than markdown
+                        pdf_mtime = os.path.getmtime(pdf_path)
+                        md_mtime = os.path.getmtime(expected_md_path)
+                        
+                        if pdf_mtime <= md_mtime:
+                            logger.debug(f"Markdown file already exists and is up-to-date: {expected_md_path}")
+                            continue
+                        else:
+                            logger.info(f"PDF is newer than markdown, reconverting: {os.path.basename(pdf_path)}")
+                    
+                    # Convert PDF to markdown
+                    logger.info(f"Converting PDF to markdown: {os.path.basename(pdf_path)}")
+                    converted_path = self.pdf_converter.process_pdf_file(pdf_path, expected_md_path)
+                    
+                    if converted_path:
+                        logger.info(f"✅ Successfully converted: {os.path.basename(pdf_path)} -> {os.path.basename(converted_path)}")
+                    else:
+                        logger.error(f"❌ Failed to convert: {os.path.basename(pdf_path)}")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing PDF {pdf_path}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error processing PDF files in directory {docs_path}: {e}")
     
     def add_documents_to_store(self, documents: List[Document]):
         """Add documents to the vector store"""
@@ -291,16 +360,19 @@ def discover_and_initialize_all_vectorstores(docs_base_path: str = "./docs"):
                     # Skip if not a directory
                     if not os.path.isdir(company_path):
                         continue
-                    
                     company_code = company_folder.upper()
                     
-                    # Check if there are any .md files in this company folder
+                    # Check if there are any .md or .pdf files in this company folder
                     md_files = [f for f in os.listdir(company_path) if f.endswith('.md')]
-                    if not md_files:
-                        logger.warning(f"⚠️ No .md files found in {company_path}")
+                    pdf_files = [f for f in os.listdir(company_path) if f.endswith('.pdf')]
+                    total_files = md_files + pdf_files
+                    
+                    if not total_files:
+                        logger.warning(f"⚠️ No .md or .pdf files found in {company_path}")
                         continue
                     
-                    logger.info(f"🏢 Found company: {company_code} with {len(md_files)} documents")
+                    file_info = f"{len(md_files)} MD files, {len(pdf_files)} PDF files"
+                    logger.info(f"🏢 Found company: {company_code} with {file_info}")
                     
                     # Initialize vector store for this combination
                     try:
@@ -313,7 +385,9 @@ def discover_and_initialize_all_vectorstores(docs_base_path: str = "./docs"):
                             "year": year,
                             "collection_name": vectorstore.collection_name,
                             "document_count": stats.get("total_documents", 0),
-                            "md_files": md_files
+                            "md_files": md_files,
+                            "pdf_files": pdf_files,
+                            "total_files": len(total_files)
                         })
                         
                         logger.info(f"✅ Initialized {company_code}_{quarter}_{year}: {stats}")
