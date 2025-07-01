@@ -126,7 +126,7 @@ Base your analysis on the research context provided above.
     user_message = HumanMessage(content=user_request)
     response = model.invoke([system_message, user_message])
     report_content = response.content
-      updated_state = {
+    updated_state = {
         "messages": state["messages"],
         "company_code": company_code,
         "sector_code": state.get("sector_code", ""),
@@ -205,7 +205,7 @@ Provide actionable suggestions for improvement.
     feedback_content = response.content
     
     print(f"DEBUG: Generated feedback for first cut report")
-      return {
+    return {
         "messages": state["messages"],
         "company_code": company_code,
         "sector_code": state.get("sector_code", ""),
