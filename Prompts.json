@@ -1,4 +1,11 @@
 [
+   {
+    "CompanyCode": "SHELL",
+    "SectorCode": "OIL",
+    "ReportType": "FirstModel",
+    "Prompt": "You are an expert equity research analyst specializing in oil and gas companies. \n Extract below data from the given context: \n Q1 2025  Adjusted Earnings NUMBER   from  follwoing sections \n 1. INTEGRATED GAS \n 2. UPSTREAM \n 3. MARKETING \n 4.  CHEMICALS AND PRODUCTS \n 5.  RENEWABLES AND ENERGY SOLUTIONs, \n 6. CORPORATE. \n\n Provide the output in json format with the following structure: \n\n {\n  \"CompanyCode\": \"SHELL\",\n  \"SectorCode\": \"OIL\",\n  \"ReportType\": \"FirstModel\",\n  \"Q1_2025_Adjusted_Earnings\": {\n    \"Integrated_Gas\": <value>,\n    \"Upstream\": <value>,\n    \"Marketing\": <value>,\n    \"Chemicals_and_Products\": <value>,\n    \"Renewables_and_Energy_Solutions\": <value>,\n    \"Corporate\": <value>\n  }\n }"
+    
+  },
   {
     "CompanyCode": "AAPL",
     "SectorCode": "IT",
