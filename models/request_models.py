@@ -66,3 +66,32 @@ class ResearchRequest(BaseModel):
                 "thread_id": "user_session_123"
             }
         }
+
+
+class FinanceDataRequest(BaseModel):
+    """
+    Request model for financial data extraction from text
+    
+    Attributes:
+        text (str): The text content containing financial metrics to extract
+        thread_id (str): Unique identifier for the conversation thread (default: 'default')
+    """
+    
+    text: str = Field(
+        ..., 
+        description="Text content containing financial metrics to extract",
+        example="The company has a PE ratio of 22.34 and current selling price is $201.45. Market cap stands at $1.2B."
+    )
+    
+    thread_id: str = Field(
+        default="default", 
+        description="Unique identifier for the conversation thread"
+    )
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "text": "The company reported strong results with PE ratio of 15.2, current selling price of $145.67, and revenue growth of 12.5%.",
+                "thread_id": "finance_session_123"
+            }
+        }

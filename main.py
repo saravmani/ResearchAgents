@@ -4,9 +4,10 @@ import uvicorn
 import json
 import os
 from graphs.reportgraph import create_research_graph
+from graphs.financedatagraph import create_finance_data_graph
 from utils.vector_store import initialize_vector_store
 from utils.promptmanager import load_prompts_data, get_prompt_for_request
-from models import ResearchRequest, ResearchResponse
+from models import ResearchRequest, ResearchResponse, FinanceDataRequest, FinanceDataResponse
 
 app = FastAPI(title="Equity Research Agent API with ChromaDB", version="1.0.0")
 
@@ -26,10 +27,9 @@ async def startup_event():
 # Load prompts data
 PROMPTS_DATA = load_prompts_data()
 
-# Initialize the graph
+# Initialize the graphs
 research_graph = create_research_graph()
-
- 
+finance_data_graph = create_finance_data_graph()
 
 @app.post("/research", response_model=ResearchResponse)
 async def research_query(request: ResearchRequest):
@@ -85,6 +85,60 @@ async def research_query(request: ResearchRequest):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
+@app.post("/extract-finance-data", response_model=FinanceDataResponse)
+async def extract_finance_data(request: FinanceDataRequest):
+    """
+    Extract financial metrics from text and return structured JSON output
+    """
+    try:
+        config = {"configurable": {"thread_id": request.thread_id}}
+        
+        # Run the finance data extraction graph
+        final_result = None
+        structured_metrics = []
+        raw_extraction = ""
+        
+        # Use stream_mode="values" to get the final state values
+        for state in finance_data_graph.stream(
+            {
+                "messages": [("user", request.text)],
+            }, 
+            config,
+            stream_mode="values"
+        ):
+            print(f"DEBUG API: Finance extraction state keys: {list(state.keys())}")
+            
+            # Get structured output from the state
+            if "structured_output" in state:
+                structured_metrics = state["structured_output"]
+                print(f"DEBUG API: Found {len(structured_metrics)} structured metrics")
+            
+            # Get raw extraction for debugging
+            if "extracted_metrics" in state:
+                raw_extraction = state["extracted_metrics"]
+            
+            # Get the final AI message
+            if "messages" in state:
+                messages = state["messages"]
+                for msg in reversed(messages):
+                    if (hasattr(msg, 'content') and 
+                        msg.content and 
+                        hasattr(msg, 'type') and 
+                        msg.type == 'ai'):
+                        final_result = msg.content
+                        print(f"DEBUG API: Found AI message with finance data")
+                        break
+        
+        return FinanceDataResponse(
+            metrics=structured_metrics or [],
+            thread_id=request.thread_id,
+            status="success",
+            raw_extraction=raw_extraction
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing finance data extraction: {str(e)}")
 
   
 
