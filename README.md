@@ -1,3 +1,8 @@
+To Run Streamlit app
+
+streamlit run document_summarizer_app.py --server.port 8502 --server.headless true
+
+
 ```
 python -m venv researchagents
 
