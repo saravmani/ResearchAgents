@@ -1,12 +1,13 @@
 from langgraph.graph import StateGraph, START, END
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from typing import TypedDict, Annotated, Optional
 import fitz  # PyMuPDF for PDF parsing
 import docx  # python-docx for Word documents
 import io
 import os
+import sqlite3
 
 # State for the document summary workflow
 class DocumentSummaryState(TypedDict):
@@ -227,8 +228,7 @@ def create_document_summary_graph():
     # Define the workflow edges
     workflow.add_edge(START, "initialize")
     workflow.add_edge("initialize", "parser")
-    
-    # Conditional routing after parser
+      # Conditional routing after parser
     workflow.add_conditional_edges(
         "parser",
         should_continue_to_summarizer,
@@ -242,8 +242,17 @@ def create_document_summary_graph():
     workflow.add_edge("summarizer", "finalize")
     workflow.add_edge("finalize", END)
     
-    # Add memory
-    memory = MemorySaver()
+    # Add SQLite-based memory persistence
+    # Create checkpoints directory if it doesn't exist
+    checkpoint_dir = os.path.join(os.path.dirname(__file__), '..', 'checkpoints')
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    # SQLite database path for checkpoints
+    db_path = os.path.join(checkpoint_dir, 'document_summary_checkpoints.db')
+    
+    # Create SQLite connection and memory saver
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    memory = SqliteSaver(conn)
     
     # Compile the graph
     app = workflow.compile(checkpointer=memory)
