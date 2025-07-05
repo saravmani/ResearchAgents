@@ -5,11 +5,60 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Python File",
+            "name": "Debug FastAPI Main",
             "type": "debugpy",
             "request": "launch",
-            // "program": "${file}"
             "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Debug Streamlit App",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "streamlit",
+            "args": [
+                "run",
+                "${workspaceFolder}/document_summarizer_app.py",
+                "--server.port",
+                "8502",
+                "--server.headless",
+                "true",
+                "--logger.level",
+                "debug"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}",
+                "STREAMLIT_SERVER_HEADLESS": "true"
+            },
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Debug Document Graph Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/test_document_summary.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Debug Finance Data Graph Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/test_finance_extraction.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
         }
     ]
 }
