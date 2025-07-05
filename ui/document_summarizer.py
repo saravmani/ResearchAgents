@@ -1,26 +1,52 @@
 import streamlit as st
 import time
 import io
-from graphs.documentsummarygraph import create_document_summary_graph
-from typing import Optional
+import json
+import sys
+import os
+from collections import Counter
 
-# Configure Streamlit page
-st.set_page_config(
-    page_title="Document Summarizer",
-    page_icon="📄",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Add parent directory to path to import from graphs
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
+sys.path.insert(0, current_dir)
 
-# Initialize session state
-if 'document_graph' not in st.session_state:
-    st.session_state.document_graph = create_document_summary_graph()
+try:
+    from graphs.documentsummarygraph import create_document_summary_graph
+except ImportError as e:
+    st.error(f"Could not import document summary graph: {e}")
+    st.error("Please ensure all required dependencies are installed.")
+    st.stop()
 
-if 'processing_complete' not in st.session_state:
-    st.session_state.processing_complete = False
-
-if 'summary_result' not in st.session_state:
-    st.session_state.summary_result = ""
+# Import UI utilities
+try:
+    from utils import (
+        format_file_size, 
+        get_processing_status_emoji, 
+        create_download_filename,
+        update_session_metrics
+    )
+except ImportError:
+    # Define fallback functions if utils import fails
+    def format_file_size(size_bytes):
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024**2:
+            return f"{size_bytes/1024:.1f} KB"
+        elif size_bytes < 1024**3:
+            return f"{size_bytes/(1024**2):.1f} MB"
+        else:
+            return f"{size_bytes/(1024**3):.1f} GB"
+    
+    def get_processing_status_emoji(stage):
+        return "🔄"
+    
+    def create_download_filename(original_name, suffix="summary"):
+        return f"{suffix}_{original_name}"
+    
+    def update_session_metrics():
+        pass
 
 def get_file_type(filename: str) -> str:
     """Extract file type from filename"""
@@ -127,37 +153,25 @@ def process_document_with_progress(uploaded_file, user_instruction: str = ""):
         progress_bar.progress(100)
         return f"Error processing document: {str(e)}"
 
-def main():
-    """Main Streamlit application"""
+def show_document_summarizer():
+    """Display the document summarizer page"""
     
     # Header
     st.title("📄 Intelligent Document Summarizer")
     st.markdown("Upload your documents and get AI-powered summaries with detailed insights!")
     
-    # Sidebar with instructions
-    with st.sidebar:
-        st.header("📋 Instructions")
+    # Instructions panel
+    with st.expander("📋 How to Use", expanded=False):
         st.markdown("""
-        **Supported File Types:**
-        - 📑 PDF files (.pdf)
-        - 📝 Word documents (.docx, .doc)
-        - 📄 Text files (.txt)
+        **Step-by-step process:**
+        1. 📁 **Upload** your document using the file uploader
+        2. ✏️ **Add instructions** (optional) for customized summaries
+        3. 🚀 **Click "Process Document"** to start analysis
+        4. 📊 **View results** in real-time with progress tracking
+        5. 💾 **Export** your summary in multiple formats
         
-        **Features:**
-        - 🤖 AI-powered parsing
-        - 📊 Intelligent summarization
-        - 🔍 Key insights extraction
-        - 📈 Progress tracking
-        
-        **How to use:**
-        1. Upload your document
-        2. Add custom instructions (optional)
-        3. Click "Process Document"
-        4. Get your summary!
+        **Supported formats:** PDF, Word (.docx/.doc), Text (.txt)
         """)
-        
-        st.header("⚙️ Settings")
-        show_debug = st.checkbox("Show debug information", value=False)
     
     # Main content area
     col1, col2 = st.columns([1, 1])
@@ -179,6 +193,34 @@ def main():
             height=100
         )
         
+        # Preset instruction templates
+        st.markdown("**Quick Templates:**")
+        template_col1, template_col2 = st.columns(2)
+        
+        with template_col1:
+            if st.button("📊 Financial Focus", use_container_width=True):
+                st.session_state.instruction_template = "Focus on financial metrics, revenue, costs, and financial performance indicators."
+                
+            if st.button("🎯 Key Decisions", use_container_width=True):
+                st.session_state.instruction_template = "Extract key decisions, recommendations, and action items from the document."
+        
+        with template_col2:
+            if st.button("⚠️ Risk Analysis", use_container_width=True):
+                st.session_state.instruction_template = "Highlight risks, challenges, and potential issues mentioned in the document."
+                
+            if st.button("📈 Executive Summary", use_container_width=True):
+                st.session_state.instruction_template = "Create a high-level executive summary suitable for senior management."
+        
+        # Apply template if selected
+        if 'instruction_template' in st.session_state:
+            user_instruction = st.text_area(
+                "📝 Custom Instructions (Optional)",
+                value=st.session_state.instruction_template,
+                height=100,
+                key="updated_instruction"
+            )
+            del st.session_state.instruction_template
+        
         # Process button
         process_button = st.button(
             "🚀 Process Document",
@@ -186,15 +228,26 @@ def main():
             disabled=uploaded_file is None,
             use_container_width=True
         )
-        
-        # File information
+          # File information
         if uploaded_file is not None:
+            file_size_formatted = format_file_size(uploaded_file.size)
             st.info(f"""
             **File Details:**
-            - Name: {uploaded_file.name}
-            - Type: {get_file_type(uploaded_file.name).upper()}
-            - Size: {uploaded_file.size:,} bytes
+            - 📄 Name: {uploaded_file.name}
+            - 🏷️ Type: {get_file_type(uploaded_file.name).upper()}
+            - 📏 Size: {uploaded_file.size:,} bytes ({file_size_formatted})
             """)
+            
+            # Show file preview for text files
+            if get_file_type(uploaded_file.name) == 'txt' and uploaded_file.size < 10000:  # Less than 10KB
+                with st.expander("👀 File Preview", expanded=False):
+                    try:
+                        file_content = uploaded_file.read()
+                        uploaded_file.seek(0)  # Reset file pointer
+                        preview_text = file_content.decode('utf-8', errors='ignore')[:500]
+                        st.text(preview_text + "..." if len(preview_text) == 500 else preview_text)
+                    except Exception as e:
+                        st.error(f"Could not preview file: {e}")
     
     with col2:
         st.header("📊 Summary Results")
@@ -210,13 +263,19 @@ def main():
                 if result:
                     st.session_state.summary_result = result
                     st.session_state.processing_complete = True
+                    st.session_state.last_processed_file = uploaded_file.name
+                    st.success("🎉 Document processing completed successfully!")
         
         # Display results
         if st.session_state.processing_complete and st.session_state.summary_result:
             st.markdown("### 📋 Document Summary")
             
+            # Add summary metadata
+            if 'last_processed_file' in st.session_state:
+                st.caption(f"📄 Summary for: **{st.session_state.last_processed_file}** | Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            
             # Create tabs for different views
-            tab1, tab2 = st.tabs(["📄 Summary", "💾 Export"])
+            tab1, tab2, tab3 = st.tabs(["📄 Summary", "💾 Export", "📊 Analytics"])
             
             with tab1:
                 st.markdown(st.session_state.summary_result)
@@ -228,7 +287,7 @@ def main():
                     if st.button("🔄 Process Another", use_container_width=True):
                         st.session_state.processing_complete = False
                         st.session_state.summary_result = ""
-                        st.experimental_rerun()
+                        st.rerun()
                 
                 with col_b:
                     if st.button("📋 Copy Summary", use_container_width=True):
@@ -263,12 +322,14 @@ def main():
                     json_data = {
                         "document_name": uploaded_file.name if uploaded_file else "document",
                         "summary": st.session_state.summary_result,
-                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "file_type": get_file_type(uploaded_file.name) if uploaded_file else "unknown",
+                        "instructions": user_instruction or "Default comprehensive summary"
                     }
                     
                     st.download_button(
                         label="📄 Export as JSON",
-                        data=str(json_data),
+                        data=json.dumps(json_data, indent=2),
                         file_name=f"summary_{uploaded_file.name if uploaded_file else 'document'}.json",
                         mime="application/json",
                         use_container_width=True
@@ -277,13 +338,17 @@ def main():
                 with col_y:
                     # Markdown export
                     markdown_content = f"""# Document Summary
-                    
-**Document:** {uploaded_file.name if uploaded_file else 'Unknown'}
-**Generated:** {time.strftime("%Y-%m-%d %H:%M:%S")}
+
+**Document:** {uploaded_file.name if uploaded_file else 'Unknown'}  
+**Generated:** {time.strftime("%Y-%m-%d %H:%M:%S")}  
+**Instructions:** {user_instruction or 'Default comprehensive summary'}
 
 ---
 
 {st.session_state.summary_result}
+
+---
+*Generated by Research Agents Platform*
 """
                     
                     st.download_button(
@@ -293,26 +358,54 @@ def main():
                         mime="text/markdown",
                         use_container_width=True
                     )
-    
-    # Debug information
-    if show_debug and st.session_state.processing_complete:
-        with st.expander("🔧 Debug Information"):
-            st.json({
-                "processing_complete": st.session_state.processing_complete,
-                "summary_length": len(st.session_state.summary_result),
-                "file_info": {
-                    "name": uploaded_file.name if uploaded_file else None,
-                    "type": get_file_type(uploaded_file.name) if uploaded_file else None,
-                    "size": uploaded_file.size if uploaded_file else None
-                }
-            })
-    
-    # Footer
-    st.markdown("---")
-    st.markdown(
-        "🤖 **Powered by LangGraph & AI** | Built with Streamlit | "
-        "Upload documents to get intelligent summaries with key insights!"
-    )
+            
+            with tab3:
+                st.markdown("### 📊 Summary Analytics")
+                
+                # Calculate basic analytics
+                summary_text = st.session_state.summary_result
+                word_count = len(summary_text.split())
+                char_count = len(summary_text)
+                line_count = len(summary_text.split('\n'))
+                
+                # Display metrics
+                analytics_col1, analytics_col2, analytics_col3 = st.columns(3)
+                
+                with analytics_col1:
+                    st.metric("📝 Word Count", f"{word_count:,}")
+                
+                with analytics_col2:
+                    st.metric("🔤 Character Count", f"{char_count:,}")
+                
+                with analytics_col3:
+                    st.metric("📏 Line Count", f"{line_count:,}")
+                
+                # Word frequency analysis (simple)
+                if word_count > 0:
+                    st.markdown("**📈 Most Common Words:**")
+                    words = summary_text.lower().split()
+                    # Filter out common words
+                    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should'}
+                    filtered_words = [word for word in words if word not in stop_words and len(word) > 3]
+                    
+                    if filtered_words:
+                        from collections import Counter
+                        word_freq = Counter(filtered_words).most_common(10)
+                        
+                        freq_data = {
+                            "Word": [item[0] for item in word_freq],
+                            "Frequency": [item[1] for item in word_freq]
+                        }
+                        
+                        st.bar_chart(freq_data, x="Word", y="Frequency")
 
-if __name__ == "__main__":
-    main()
+def initialize_document_summarizer_session():
+    """Initialize session state for document summarizer"""
+    if 'document_graph' not in st.session_state:
+        st.session_state.document_graph = create_document_summary_graph()
+
+    if 'processing_complete' not in st.session_state:
+        st.session_state.processing_complete = False
+
+    if 'summary_result' not in st.session_state:
+        st.session_state.summary_result = ""

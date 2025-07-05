@@ -22,7 +22,7 @@
             "module": "streamlit",
             "args": [
                 "run",
-                "${workspaceFolder}/document_summarizer_app.py",
+                "${workspaceFolder}/ui/main_app.py",
                 "--server.port",
                 "8502",
                 "--server.headless",
