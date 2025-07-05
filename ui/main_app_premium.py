@@ -13,6 +13,7 @@ try:
     from home_page import show_home_page
     from document_summarizer import show_document_summarizer, initialize_document_summarizer_session
     from document_upload_qa import show_document_summarizer as show_document_upload_qa, initialize_document_summarizer_session as init_upload_qa
+    from table_extraction import show_table_extraction, initialize_table_extraction_session
 except ImportError as e:
     st.error(f"Import error: {e}")
     st.stop()
@@ -32,6 +33,7 @@ if 'current_page' not in st.session_state:
 # Initialize document summarizer session state
 initialize_document_summarizer_session()
 init_upload_qa()
+initialize_table_extraction_session()
 
 def inject_premium_css():
     """Inject premium CSS styling"""
@@ -320,14 +322,16 @@ def create_premium_sidebar():
         ''', unsafe_allow_html=True)
         
         # Navigation section
-        show_debug = create_premium_navigation()
-          # Page-specific tools
+        show_debug = create_premium_navigation()        # Page-specific tools
         if st.session_state.current_page == "Document Summarizer":
             create_document_metrics()
             create_document_actions()
         elif st.session_state.current_page == "Document Upload & Q&A":
             create_upload_qa_metrics()
             create_upload_qa_actions()
+        elif st.session_state.current_page == "Table Extraction":
+            create_table_extraction_metrics()
+            create_table_extraction_actions()
         elif st.session_state.current_page == "Home":
             create_home_quick_actions()
         
@@ -356,12 +360,17 @@ def create_premium_navigation():
             "title": "Document Summarizer",
             "description": "AI Document Analysis",
             "key": "Document Summarizer"
-        },
-        {
+        },        {
             "icon": "📁", 
             "title": "Document Upload & Q&A",
             "description": "Upload, Store & Query Documents",
             "key": "Document Upload & Q&A"
+        },
+        {
+            "icon": "📊", 
+            "title": "Table Extraction",
+            "description": "Extract Tables from PDFs",
+            "key": "Table Extraction"
         }
     ]
     
@@ -651,18 +660,111 @@ def create_upload_qa_actions():
     
     st.markdown('</div>', unsafe_allow_html=True)
 
+def create_table_extraction_metrics():
+    """Create table extraction metrics"""
+    st.markdown('<div class="nav-container">', unsafe_allow_html=True)
+    st.markdown('<div class="nav-title">📊 Table Extraction Metrics</div>', unsafe_allow_html=True)
+    
+    # PDFs processed metric
+    pdfs_processed = st.session_state.get('table_extraction_pdfs_processed', 0)
+    if pdfs_processed > 0:
+        st.markdown(f'''
+        <div class="metric-card">
+            <div class="metric-label">PDFs Processed</div>
+            <div class="metric-value">{pdfs_processed}</div>
+            <div class="metric-desc">documents analyzed</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    # Tables extracted metric
+    tables_extracted = st.session_state.get('table_extraction_tables_found', 0)
+    if tables_extracted > 0:
+        st.markdown(f'''
+        <div class="metric-card">
+            <div class="metric-label">Tables Extracted</div>
+            <div class="metric-value">{tables_extracted}</div>
+            <div class="metric-desc">converted to markdown</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    # Pages processed metric
+    pages_processed = st.session_state.get('table_extraction_pages_processed', 0)
+    if pages_processed > 0:
+        st.markdown(f'''
+        <div class="metric-card">
+            <div class="metric-label">Pages Analyzed</div>
+            <div class="metric-value">{pages_processed}</div>
+            <div class="metric-desc">total pages scanned</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    # Last extraction info
+    if st.session_state.get('last_extraction_result'):
+        result = st.session_state.last_extraction_result
+        if result.get('success'):
+            st.markdown(f'''
+            <div class="metric-card">
+                <div class="metric-label">Last Extraction</div>
+                <div class="metric-value" style="font-size: 1rem;">✅ {result.get('company', 'Unknown')}</div>
+                <div class="metric-desc">{result.get('document', 'Unknown')}</div>
+            </div>
+            ''', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def create_table_extraction_actions():
+    """Create table extraction action buttons"""
+    st.markdown('<div class="nav-container">', unsafe_allow_html=True)
+    st.markdown('<div class="nav-title">⚡ Table Extraction Actions</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔄 Reset Session", help="Clear extraction session data", use_container_width=True):
+            # Clear table extraction session data
+            extraction_keys = [k for k in st.session_state.keys() if k.startswith('table_extraction_')]
+            for key in extraction_keys:
+                del st.session_state[key]
+            if 'last_extraction_result' in st.session_state:
+                del st.session_state['last_extraction_result']
+            st.success("✅ Extraction session cleared!")
+            st.rerun()
+    
+    with col2:
+        if st.button("📁 Browse Extracts", help="View extracted tables folder", use_container_width=True):
+            extracted_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "extracted_tables")
+            if os.path.exists(extracted_path):
+                st.info(f"📁 Extracted tables folder: {extracted_path}")
+            else:
+                st.warning("⚠️ Extracted tables folder not found")
+    
+    # Additional actions
+    if st.button("📄 Scan Available PDFs", help="Scan for available PDF documents", use_container_width=True):
+        docs_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs")
+        pdf_count = 0
+        if os.path.exists(docs_path):
+            for root, dirs, files in os.walk(docs_path):
+                pdf_count += len([f for f in files if f.lower().endswith('.pdf')])
+        st.info(f"📊 Found {pdf_count} PDF documents available for table extraction")
+    
+    if st.button("📋 Batch Extract", help="Extract tables from multiple PDFs", use_container_width=True, disabled=True):
+        st.info("🔜 Batch extraction feature coming soon!")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
 def main():
     """Main application with premium UI"""
     
     # Create premium sidebar
-    show_debug = create_premium_sidebar()
-      # Main content area
+    show_debug = create_premium_sidebar()    # Main content area
     if st.session_state.current_page == "Home":
         show_home_page()
     elif st.session_state.current_page == "Document Summarizer":
         show_document_summarizer()
     elif st.session_state.current_page == "Document Upload & Q&A":
         show_document_upload_qa()
+    elif st.session_state.current_page == "Table Extraction":
+        show_table_extraction()
         
         # Enhanced debug console
         if show_debug:
