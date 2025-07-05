@@ -1,9 +1,0 @@
-@echo off
-echo Starting Document Summarizer Streamlit App...
-echo.
-echo Installing required packages...
-pip install PyMuPDF python-docx
-echo.
-echo Starting Streamlit application...
-streamlit run document_summarizer_app.py --server.port 8502
-pause

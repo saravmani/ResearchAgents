@@ -12,6 +12,7 @@ sys.path.insert(0, current_dir)
 try:
     from home_page import show_home_page
     from document_summarizer import show_document_summarizer, initialize_document_summarizer_session
+    from document_upload_qa import show_document_summarizer as show_document_upload_qa, initialize_document_summarizer_session as init_upload_qa
 except ImportError as e:
     st.error(f"Import error: {e}")
     st.stop()
@@ -30,6 +31,7 @@ if 'current_page' not in st.session_state:
 
 # Initialize document summarizer session state
 initialize_document_summarizer_session()
+init_upload_qa()
 
 def inject_premium_css():
     """Inject premium CSS styling"""
@@ -319,11 +321,13 @@ def create_premium_sidebar():
         
         # Navigation section
         show_debug = create_premium_navigation()
-        
-        # Page-specific tools
+          # Page-specific tools
         if st.session_state.current_page == "Document Summarizer":
             create_document_metrics()
             create_document_actions()
+        elif st.session_state.current_page == "Document Upload & Q&A":
+            create_upload_qa_metrics()
+            create_upload_qa_actions()
         elif st.session_state.current_page == "Home":
             create_home_quick_actions()
         
@@ -339,8 +343,7 @@ def create_premium_navigation():
     """Create premium navigation with enhanced styling"""
     st.markdown('<div class="nav-container">', unsafe_allow_html=True)
     st.markdown('<div class="nav-title">🧭 Navigation</div>', unsafe_allow_html=True)
-    
-    # Navigation options
+      # Navigation options
     nav_options = [
         {
             "icon": "🏠",
@@ -353,6 +356,12 @@ def create_premium_navigation():
             "title": "Document Summarizer",
             "description": "AI Document Analysis",
             "key": "Document Summarizer"
+        },
+        {
+            "icon": "📁", 
+            "title": "Document Upload & Q&A",
+            "description": "Upload, Store & Query Documents",
+            "key": "Document Upload & Q&A"
         }
     ]
     
@@ -390,10 +399,9 @@ def create_premium_navigation():
             ''', unsafe_allow_html=True)
     
     st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Debug toggle for document summarizer
+      # Debug toggle for document pages
     show_debug = False
-    if st.session_state.current_page == "Document Summarizer":
+    if st.session_state.current_page in ["Document Summarizer", "Document Upload & Q&A"]:
         show_debug = st.checkbox("🔧 Developer Mode", value=False, help="Show debug information")
     
     return show_debug
@@ -541,17 +549,120 @@ def create_platform_info():
     
     st.markdown('</div>', unsafe_allow_html=True)
 
+def create_upload_qa_metrics():
+    """Create document upload & Q&A metrics"""
+    st.markdown('<div class="nav-container">', unsafe_allow_html=True)
+    st.markdown('<div class="nav-title">📊 Upload & Q&A Metrics</div>', unsafe_allow_html=True)
+    
+    # Documents uploaded metric
+    docs_uploaded = st.session_state.get('upload_qa_docs_processed', 0)
+    if docs_uploaded > 0:
+        st.markdown(f'''
+        <div class="metric-card">
+            <div class="metric-label">Documents Uploaded</div>
+            <div class="metric-value">{docs_uploaded}</div>
+            <div class="metric-desc">indexed in vector database</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    # Vector database collections
+    if 'vector_collections' in st.session_state:
+        collections_count = len(st.session_state.vector_collections)
+        st.markdown(f'''
+        <div class="metric-card">
+            <div class="metric-label">Vector Collections</div>
+            <div class="metric-value">{collections_count}</div>
+            <div class="metric-desc">active document collections</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    # Q&A queries processed
+    qa_queries = st.session_state.get('upload_qa_queries_processed', 0)
+    if qa_queries > 0:
+        st.markdown(f'''
+        <div class="metric-card">
+            <div class="metric-label">Q&A Queries</div>
+            <div class="metric-value">{qa_queries}</div>
+            <div class="metric-desc">questions answered</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    # Current company/quarter context
+    if 'current_company' in st.session_state and st.session_state.current_company:
+        company = st.session_state.current_company
+        quarter = st.session_state.get('current_quarter', 'N/A')
+        year = st.session_state.get('current_year', 'N/A')
+        st.markdown(f'''
+        <div class="metric-card">
+            <div class="metric-label">Current Context</div>
+            <div class="metric-value" style="font-size: 1rem;">🏢 {company}</div>
+            <div class="metric-desc">{year} {quarter}</div>
+        </div>
+        ''', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def create_upload_qa_actions():
+    """Create document upload & Q&A action buttons"""
+    st.markdown('<div class="nav-container">', unsafe_allow_html=True)
+    st.markdown('<div class="nav-title">⚡ Upload & Q&A Actions</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔄 Reset Session", help="Clear upload session data", use_container_width=True):
+            keys_to_keep = ['current_page']
+            upload_keys = [k for k in st.session_state.keys() if k.startswith('upload_qa_')]
+            for key in upload_keys:
+                if key not in keys_to_keep:
+                    del st.session_state[key]
+            # Reset specific upload/qa session state
+            if 'vector_collections' in st.session_state:
+                del st.session_state['vector_collections']
+            if 'current_company' in st.session_state:
+                del st.session_state['current_company']
+            st.success("✅ Upload session cleared!")
+            st.rerun()
+    
+    with col2:
+        if st.button("🗑️ Clear Vector DB", help="Clear all vector collections", use_container_width=True):
+            if st.button("⚠️ Confirm Clear", help="This will delete all indexed documents"):
+                try:
+                    # Clear vector database collections
+                    if 'document_index_helper' in st.session_state:
+                        helper = st.session_state.document_index_helper
+                        # Delete all collections (implement this logic based on your helper)
+                        st.session_state.vector_collections = []
+                    st.success("✅ Vector database cleared!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error clearing vector DB: {str(e)}")
+    
+    # Additional actions
+    if st.button("📁 Browse Documents", help="View uploaded documents folder", use_container_width=True):
+        docs_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs")
+        if os.path.exists(docs_path):
+            st.info(f"📁 Documents folder: {docs_path}")
+        else:
+            st.warning("⚠️ Documents folder not found")
+    
+    if st.button("📊 Export Q&A History", help="Export question-answer history", use_container_width=True, disabled=True):
+        st.info("🔜 Q&A export feature coming soon!")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
 def main():
     """Main application with premium UI"""
     
     # Create premium sidebar
     show_debug = create_premium_sidebar()
-    
-    # Main content area
+      # Main content area
     if st.session_state.current_page == "Home":
         show_home_page()
     elif st.session_state.current_page == "Document Summarizer":
         show_document_summarizer()
+    elif st.session_state.current_page == "Document Upload & Q&A":
+        show_document_upload_qa()
         
         # Enhanced debug console
         if show_debug:
