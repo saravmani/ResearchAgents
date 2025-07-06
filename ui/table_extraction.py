@@ -25,7 +25,7 @@ def list_available_documents():
         return available_docs
     
     try:
-        # Walk through the directory structure
+        # Walk through the directory structure: docs/YYYY/QX/Company/DocumentType/
         for year_dir in os.listdir(docs_dir):
             year_path = os.path.join(docs_dir, year_dir)
             if not os.path.isdir(year_path):
@@ -40,18 +40,24 @@ def list_available_documents():
                     company_path = os.path.join(quarter_path, company_dir)
                     if not os.path.isdir(company_path):
                         continue
+                    
+                    for doc_type_dir in os.listdir(company_path):
+                        doc_type_path = os.path.join(company_path, doc_type_dir)
+                        if not os.path.isdir(doc_type_path):
+                            continue
                         
-                    # Find PDF files
-                    for file_name in os.listdir(company_path):
-                        if file_name.lower().endswith('.pdf'):
-                            available_docs.append({
-                                'year': year_dir,
-                                'quarter': quarter_dir,
-                                'company': company_dir,
-                                'document': file_name,
-                                'full_path': os.path.join(company_path, file_name),
-                                'relative_path': os.path.join('docs', year_dir, quarter_dir, company_dir, file_name)
-                            })
+                        # Find PDF files in document type folder
+                        for file_name in os.listdir(doc_type_path):
+                            if file_name.lower().endswith('.pdf'):
+                                available_docs.append({
+                                    'year': year_dir,
+                                    'quarter': quarter_dir,
+                                    'company': company_dir,
+                                    'document_type': doc_type_dir,
+                                    'document': file_name,
+                                    'full_path': os.path.join(doc_type_path, file_name),
+                                    'relative_path': os.path.join('docs', year_dir, quarter_dir, company_dir, doc_type_dir, file_name)
+                                })
     except Exception as e:
         st.error(f"Error scanning documents: {e}")
     
@@ -83,9 +89,8 @@ def show_table_extraction():
     # Tab 1: Manual Input
     with manual_tab:
         st.subheader("🎯 Extract Tables from Specific Document")
-        
-        # Input fields
-        col1, col2 = st.columns(2)
+          # Input fields
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             year = st.selectbox(
@@ -103,21 +108,30 @@ def show_table_extraction():
             )
         
         with col2:
-            company_name = st.text_input(
+            company_name = st.selectbox(
                 "Company Name",
-                value="SHELL",
-                help="Enter the exact company folder name (case sensitive)"
+                ["SHELL", "AAPL"],
+                index=0,
+                help="Select the company"
             )
             
+            document_type = st.selectbox(
+                "Document Type",
+                ["QRAReport", "FirstCutModel", "BalanceSheet"],
+                index=0,
+                help="Select the document type"
+            )
+        
+        with col3:
             document_name = st.text_input(
                 "Document Name",
                 value="q1-2025-qra.pdf",
                 help="Enter the exact PDF filename"
             )
         
-        # Validate document path
+        # Validate document path (updated to include document type)
         if company_name and document_name:
-            document_path = os.path.join(parent_dir, "docs", year, quarter, company_name, document_name)
+            document_path = os.path.join(parent_dir, "docs", year, quarter, company_name.upper(), document_type, document_name)
             
             if os.path.exists(document_path):
                 st.success(f"✅ Document found: {os.path.relpath(document_path, parent_dir)}")
@@ -129,17 +143,17 @@ def show_table_extraction():
                 
             else:
                 st.warning(f"⚠️ Document not found: {os.path.relpath(document_path, parent_dir)}")
-        
-        # Extract button
+                st.info("Expected path structure: docs/YYYY/QX/COMPANY/DOCUMENT_TYPE/filename.pdf")
+          # Extract button
         extract_button = st.button(
             "🚀 Extract Tables",
             type="primary",
-            disabled=not (company_name and document_name and year and quarter) or st.session_state.get('extraction_in_progress', False)
+            disabled=not (company_name and document_name and year and quarter and document_type) or st.session_state.get('extraction_in_progress', False)
         )
         
         # Process extraction
         if extract_button:
-            process_table_extraction(year, quarter, company_name, document_name)
+            process_table_extraction(year, quarter, company_name, document_name, document_type)
     
     # Tab 2: Browse Documents
     with browse_tab:
@@ -149,15 +163,15 @@ def show_table_extraction():
         
         if available_docs:
             st.write(f"Found **{len(available_docs)}** PDF documents:")
-            
-            # Create a selection interface
+              # Create a selection interface
             for i, doc in enumerate(available_docs):
-                with st.expander(f"📄 {doc['company']} - {doc['document']}", expanded=False):
+                with st.expander(f"📄 {doc['company']} - {doc['document_type']} - {doc['document']}", expanded=False):
                     col1, col2, col3 = st.columns([2, 1, 1])
                     
                     with col1:
                         st.write(f"**Path:** {doc['relative_path']}")
                         st.write(f"**Period:** {doc['quarter']} {doc['year']}")
+                        st.write(f"**Type:** {doc['document_type']}")
                     
                     with col2:
                         file_size = os.path.getsize(doc['full_path'])
@@ -171,7 +185,8 @@ def show_table_extraction():
                                 doc['year'], 
                                 doc['quarter'], 
                                 doc['company'], 
-                                doc['document']
+                                doc['document'],
+                                doc['document_type']
                             )
         else:
             st.info("No PDF documents found in the docs directory.")
@@ -276,7 +291,7 @@ docs/
                             key=f"download_{file_info['name']}"
                         )
 
-def process_table_extraction(year: str, quarter: str, company_name: str, document_name: str):
+def process_table_extraction(year: str, quarter: str, company_name: str, document_name: str, document_type: str = "General"):
     """Process the table extraction with progress indicators"""
     
     # Set extraction in progress
@@ -321,6 +336,7 @@ def process_table_extraction(year: str, quarter: str, company_name: str, documen
                     'quarter': quarter,
                     'company': company_name,
                     'document': document_name,
+                    'document_type': document_type,
                     'success': True,
                     'message': message_content,
                     'output_path': extract_output_path_from_message(message_content),

@@ -18,6 +18,7 @@ class PDFTableExtractionState(TypedDict):
     quarter: str
     company_name: str
     document_name: str
+    document_type: str
     document_path: str
     pdf_content: bytes
     total_pages: int
@@ -34,15 +35,16 @@ def initialize_table_extraction(state):
     quarter = state.get("quarter", "")
     company_name = state.get("company_name", "")
     document_name = state.get("document_name", "")
+    document_type = state.get("document_type", "General")
     
-    print(f"DEBUG: initialize_table_extraction - {company_name} {quarter} {year} - {document_name}")
+    print(f"DEBUG: initialize_table_extraction - {company_name} {quarter} {year} - {document_type} - {document_name}")
     
-    # Construct document path based on the directory structure
+    # Construct document path based on the directory structure: docs/YYYY/QX/CompanyName/DocumentType/
     current_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(current_dir)
     docs_dir = os.path.join(parent_dir, "docs")
     
-    document_path = os.path.join(docs_dir, year, quarter, company_name.upper(), document_name)
+    document_path = os.path.join(docs_dir, year, quarter, company_name.upper(), document_type, document_name)
     
     return {
         "messages": state.get("messages", []),
@@ -50,6 +52,7 @@ def initialize_table_extraction(state):
         "quarter": quarter,
         "company_name": company_name,
         "document_name": document_name,
+        "document_type": document_type,
         "document_path": document_path,
         "pdf_content": b"",
         "total_pages": 0,

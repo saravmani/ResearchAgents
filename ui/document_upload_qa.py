@@ -43,7 +43,7 @@ def get_file_type(filename: str) -> str:
     else:
         return 'unknown'
 
-def save_uploaded_file(uploaded_file, company_name: str, quarter: str = "Q1", year: int = 2025) -> str:
+def save_uploaded_file(uploaded_file, company_name: str, quarter: str = "Q1", year: int = 2025, document_type: str = "General") -> str:
     """
     Save uploaded file to the docs directory structure and return the full path.
     
@@ -52,14 +52,15 @@ def save_uploaded_file(uploaded_file, company_name: str, quarter: str = "Q1", ye
         company_name: Name of the company
         quarter: Quarter (Q1, Q2, Q3, Q4)
         year: Year
+        document_type: Type of document (QRAReport, FirstCutModel, BalanceSheet)
         
     Returns:
         str: Full path to the saved file
     """
     try:
-        # Create the directory structure: docs/YYYY/QX/CompanyName/
+        # Create the directory structure: docs/YYYY/QX/CompanyName/DocumentType/
         docs_base = os.path.join(parent_dir, "docs")
-        company_dir = os.path.join(docs_base, str(year), quarter, company_name.upper())
+        company_dir = os.path.join(docs_base, str(year), quarter, company_name.upper(), document_type)
         
         # Create directories if they don't exist
         os.makedirs(company_dir, exist_ok=True)
@@ -135,7 +136,7 @@ def search_documents(query: str, collection_name: str = "company_documents", k: 
         st.error(f"Error searching documents: {str(e)}")
         return []
 
-def process_document_with_query(uploaded_file, user_query: str, company_name: str, quarter: str = "Q1", year: int = 2025):
+def process_document_with_query(uploaded_file, user_query: str, company_name: str, quarter: str = "Q1", year: int = 2025, document_type: str = "General"):
     """Process document by saving, indexing, and answering user query"""
     
     # Create progress tracking
@@ -147,7 +148,7 @@ def process_document_with_query(uploaded_file, user_query: str, company_name: st
         status_text.text("💾 Saving document to company folder...")
         progress_bar.progress(20)
         
-        file_path = save_uploaded_file(uploaded_file, company_name, quarter, year)
+        file_path = save_uploaded_file(uploaded_file, company_name, quarter, year, document_type)
         if not file_path:
             return "Failed to save document"
         
@@ -155,7 +156,7 @@ def process_document_with_query(uploaded_file, user_query: str, company_name: st
         status_text.text("🔍 Indexing document in vector database...")
         progress_bar.progress(40)
         
-        collection_name = f"{company_name.upper()}_{quarter}_{year}"
+        collection_name = f"{company_name}_{document_type}_{quarter}_{year}"
         index_result = index_document_in_vectordb(file_path, collection_name)
         
         if not index_result.get("success"):
@@ -250,16 +251,16 @@ def show_document_summarizer():
     # Tab 1: Document Upload
     with upload_tab:
         st.subheader("📁 Document Upload & Indexing")
-        
-        # Company information input
+          # Company information input
         with st.expander("🏢 Company Information", expanded=True):
             company_col1, company_col2, company_col3 = st.columns(3)
             
             with company_col1:
-                company_name = st.text_input(
+                company_name = st.selectbox(
                     "Company Name",
-                    value="ACME_CORP",
-                    help="Enter the company name (will be used for folder organization)"
+                    ["SHELL", "AAPL"],
+                    index=0,
+                    help="Select the company for document organization"
                 )
             
             with company_col2:
@@ -279,21 +280,28 @@ def show_document_summarizer():
                     help="Select the year"
                 )
         
+        # Document type selection
+        with st.expander("📄 Document Type", expanded=True):
+            document_type = st.selectbox(
+                "Document Type",
+                ["QRAReport", "FirstCutModel", "BalanceSheet"],
+                index=0,
+                help="Select the type of document you're uploading"
+            )
+        
         # File upload
         uploaded_file = st.file_uploader(
             "Choose a document to upload",
             type=['pdf', 'txt', 'docx', 'doc'],
             help="Supported formats: PDF, TXT, DOCX, DOC"
         )
-        
-        # Collection name for indexing
+          # Collection name for indexing
         collection_name = st.text_input(
             "Collection Name (optional)",
-            value=f"{company_name.upper()}_{quarter}_{year}" if company_name else "company_documents",
+            value=f"{company_name}_{document_type}_{quarter}_{year}" if company_name else "company_documents",
             help="Documents will be indexed in this collection"
         )
-        
-        # Upload button
+          # Upload button
         col_upload1, col_upload2 = st.columns(2)
         
         with col_upload1:
@@ -315,7 +323,7 @@ def show_document_summarizer():
         # Process upload only
         if upload_button and uploaded_file and company_name:
             with st.spinner("Uploading document..."):
-                file_path = save_uploaded_file(uploaded_file, company_name, quarter, year)
+                file_path = save_uploaded_file(uploaded_file, company_name, quarter, year, document_type)
                 if file_path:
                     st.success(f"✅ Document uploaded successfully!")
                     st.session_state.last_uploaded_file = file_path
@@ -325,7 +333,7 @@ def show_document_summarizer():
         if index_button and uploaded_file and company_name:
             with st.spinner("Uploading and indexing document..."):
                 # First save the file
-                file_path = save_uploaded_file(uploaded_file, company_name, quarter, year)
+                file_path = save_uploaded_file(uploaded_file, company_name, quarter, year, document_type)
                 if file_path:
                     # Then index it
                     result = index_document_in_vectordb(file_path, collection_name)
@@ -472,18 +480,24 @@ def show_document_summarizer():
             new_collection_name = st.text_input("Collection Name")
             if st.button("Create Collection") and new_collection_name:
                 st.info("Collections are created automatically when you index documents.")
-    
-    # File structure preview (outside tabs)
+      # File structure preview (outside tabs)
     with st.expander("📁 Document Storage Structure Preview", expanded=False):
         st.code(f"""
 docs/
 ├── 2025/
 │   ├── Q1/
-│   │   ├── ACME_CORP/
-│   │   │   ├── document1.pdf
-│   │   │   ├── document2.docx
-│   │   │   └── ...
-│   │   └── OTHER_COMPANIES/
+│   │   ├── SHELL/
+│   │   │   ├── QRAReport/
+│   │   │   │   ├── report1.pdf
+│   │   │   │   └── report2.pdf
+│   │   │   ├── FirstCutModel/
+│   │   │   │   └── model.xlsx
+│   │   │   └── BalanceSheet/
+│   │   │       └── balance.pdf
+│   │   └── AAPL/
+│   │       ├── QRAReport/
+│   │       ├── FirstCutModel/
+│   │       └── BalanceSheet/
 │   └── OTHER_QUARTERS/
 └── OTHER_YEARS/
         """)
