@@ -337,7 +337,7 @@ def should_continue_extraction(state):
     
     if processing_stage in ["extraction_error", "load_error"]:
         return "finalize"
-    elif current_page < 10:
+    elif current_page < total_pages:
         return "extract_page"
     else:
         return "accumulate"
@@ -564,15 +564,16 @@ def create_pdf_table_extraction_graph():
     return app
 
 # Convenience function for easy usage
-def extract_pdf_tables_with_vision(year: str, quarter: str, company_name: str, document_name: str):
+def extract_pdf_tables_with_vision(year: str, quarter: str, company_name: str, document_name: str, document_type: str = "General"):
     """
     Convenience function to extract tables from a PDF document using vision models.
     
     Args:
         year (str): Year (e.g., "2025")
         quarter (str): Quarter (e.g., "Q1")
-        company_name (str): Company name (e.g., "ACME_CORP")
+        company_name (str): Company name (e.g., "SHELL")
         document_name (str): Document filename (e.g., "financial_report.pdf")
+        document_type (str): Document type (e.g., "QRAReport", "FirstCutModel", "BalanceSheet")
     
     Returns:
         dict: Result of the table extraction process
@@ -584,10 +585,11 @@ def extract_pdf_tables_with_vision(year: str, quarter: str, company_name: str, d
         "year": year,
         "quarter": quarter,
         "company_name": company_name,
-        "document_name": document_name
+        "document_name": document_name,
+        "document_type": document_type
     }
     
-    config = {"configurable": {"thread_id": f"vision_table_extract_{company_name}_{quarter}_{year}_{document_name}"}}
+    config = {"configurable": {"thread_id": f"vision_table_extract_{company_name}_{document_type}_{quarter}_{year}_{document_name}"}}
     
     # Run the graph
     result = graph.invoke(initial_state, config)
@@ -595,9 +597,9 @@ def extract_pdf_tables_with_vision(year: str, quarter: str, company_name: str, d
     return result
 
 # Keep original function name for compatibility
-def extract_pdf_tables(year: str, quarter: str, company_name: str, document_name: str):
+def extract_pdf_tables(year: str, quarter: str, company_name: str, document_name: str, document_type: str = "General"):
     """Legacy function name - now uses vision-enhanced extraction"""
-    return extract_pdf_tables_with_vision(year, quarter, company_name, document_name)
+    return extract_pdf_tables_with_vision(year, quarter, company_name, document_name, document_type)
 
 if __name__ == "__main__":
     # Example usage

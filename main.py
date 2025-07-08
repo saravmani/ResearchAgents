@@ -1,8 +1,10 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from typing import Dict, Any
 import uvicorn
 import json
 import os
+import asyncio
 from graphs.reportgraph import create_research_graph
 from graphs.financedatagraph import create_finance_data_graph
 from utils.vector_store import initialize_vector_store
@@ -30,6 +32,68 @@ PROMPTS_DATA = load_prompts_data()
 # Initialize the graphs
 research_graph = create_research_graph()
 finance_data_graph = create_finance_data_graph()
+
+async def stream_finance_data_results(request: FinanceDataRequest):
+    """
+    An async generator that streams the finance data extraction graph's output.
+    """
+    config = {"configurable": {"thread_id": request.thread_id}}
+    
+    # Use the async version of the stream: astream()
+    async for state in finance_data_graph.astream(
+        {
+            "messages": [("user", request.text)],
+        }, 
+        config,
+        stream_mode="values"
+    ):
+        print(f"DEBUG API: Finance extraction state keys: {list(state.keys())}")
+        
+        # Prepare the streaming data
+        stream_data = {
+            "type": "finance_data_update",
+            "thread_id": request.thread_id,
+            "status": "processing"
+        }
+        
+        # Get structured output from the state
+        if "structured_output" in state:
+            structured_metrics = state["structured_output"]
+            stream_data["metrics"] = structured_metrics
+            stream_data["metrics_count"] = len(structured_metrics)
+            print(f"DEBUG API: Found {len(structured_metrics)} structured metrics")
+        
+        # Get raw extraction for debugging
+        if "extracted_metrics" in state:
+            raw_extraction = state["extracted_metrics"]
+            stream_data["raw_extraction"] = raw_extraction
+        
+        # Get the final AI message
+        if "messages" in state:
+            messages = state["messages"]
+            for msg in reversed(messages):
+                if (hasattr(msg, 'content') and 
+                    msg.content and 
+                    hasattr(msg, 'type') and 
+                    msg.type == 'ai'):
+                    stream_data["ai_message"] = msg.content
+                    stream_data["processing_stage"] = state.get("processing_stage", "unknown")
+                    print(f"DEBUG API: Found AI message with finance data")
+                    break
+        
+        # Only stream if we have meaningful data
+        if "metrics" in stream_data or "ai_message" in stream_data:
+            data_to_send = json.dumps(stream_data)
+            yield f"data: {data_to_send}\n\n"
+            await asyncio.sleep(0.1)
+    
+    # Send final completion event
+    final_data = json.dumps({
+        "type": "finance_data_complete",
+        "thread_id": request.thread_id,
+        "status": "completed"
+    })
+    yield f"data: {final_data}\n\n"
 
 @app.post("/research", response_model=ResearchResponse)
 async def research_query(request: ResearchRequest):
@@ -86,10 +150,31 @@ async def research_query(request: ResearchRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
 
-@app.post("/extract-finance-data", response_model=FinanceDataResponse)
+@app.post("/extract-finance-data", response_model=None)
 async def extract_finance_data(request: FinanceDataRequest):
     """
-    Extract financial metrics from text and return structured JSON output
+    Extract financial metrics from text and return structured JSON output.
+    This endpoint now streams the results using Server-Sent Events.
+    """
+    try:
+        return StreamingResponse(
+            stream_finance_data_results(request), 
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing finance data extraction: {str(e)}")
+
+@app.post("/extract-finance-data-sync", response_model=FinanceDataResponse)
+async def extract_finance_data_sync(request: FinanceDataRequest):
+    """
+    Non-streaming version of finance data extraction (for backward compatibility)
     """
     try:
         config = {"configurable": {"thread_id": request.thread_id}}

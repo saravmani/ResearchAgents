@@ -17,14 +17,21 @@ python-docx==1.1.0
 pandas>=1.5.0
 openpyxl>=3.0.0
 
+# PDF table extraction with camelot-py
+camelot-py[cv]>=0.11.0
+ghostscript>=0.7
+
 # Additional packages for document processing
 # PyMuPDF for PDF parsing
 # python-docx for Word document parsing
 # pandas for Excel reading
 # openpyxl for Excel file support
+# camelot-py for PDF table extraction
+# ghostscript for camelot-py dependencies
 
 # pip install langchain langgraph langchain-groq python-multipart chromadb langchain-chroma langchain-community 
 # pip install fastapi uvicorn pydantic sentence-transformers PyPDF2 streamlit
 # pip install langchain_chroma
-# pip install PyMuPDF python-docx pandas openpyxl
+# pip install PyMuPDF python-docx pandas openpyxl 
+# pip install camelot-py[cv] ghostscript
  

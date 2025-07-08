@@ -7,6 +7,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+docs
+extracted_images
+extracted_tables
 # C extensions
 *.so
 .langgraph_api
