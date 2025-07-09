@@ -7,9 +7,10 @@ import os
 import asyncio
 from graphs.reportgraph import create_research_graph
 from graphs.financedatagraph import create_finance_data_graph
+from graphs.mapreduce_graph import create_transcript_mapreduce_graph, analyze_transcript
 from utils.vector_store import initialize_vector_store
 from utils.promptmanager import load_prompts_data, get_prompt_for_request
-from models import ResearchRequest, ResearchResponse, FinanceDataRequest, FinanceDataResponse
+from models import ResearchRequest, ResearchResponse, FinanceDataRequest, FinanceDataResponse, TranscriptAnalysisRequest, TranscriptAnalysisResponse
 
 app = FastAPI(title="Equity Research Agent API with ChromaDB", version="1.0.0")
 
@@ -32,6 +33,7 @@ PROMPTS_DATA = load_prompts_data()
 # Initialize the graphs
 research_graph = create_research_graph()
 finance_data_graph = create_finance_data_graph()
+# transcript_mapreduce_graph = create_transcript_mapreduce_graph()
 
 async def stream_finance_data_results(request: FinanceDataRequest):
     """
@@ -95,6 +97,78 @@ async def stream_finance_data_results(request: FinanceDataRequest):
     })
     yield f"data: {final_data}\n\n"
 
+
+async def stream_transcript_analysis_results(request: TranscriptAnalysisRequest):
+    """
+    An async generator that streams the transcript analysis graph's output.
+    """
+    # Use the analyze_transcript function which is already an async generator
+    async for state in analyze_transcript(request.file_path, request.thread_id):
+        print(f"DEBUG API: Transcript analysis state keys: {list(state.keys())}")
+        
+        # Prepare the streaming data
+        stream_data = {
+            "type": "transcript_analysis_update",
+            "thread_id": request.thread_id,
+            "status": "processing",
+            "file_path": request.file_path
+        }
+        
+        # Add current step information
+        if "error" in state and state["error"]:
+            stream_data["error"] = state["error"]
+            stream_data["status"] = "error"
+        
+        # Add PDF text extraction progress
+        if "transcript_text" in state and state["transcript_text"]:
+            text_length = len(state["transcript_text"])
+            stream_data["pdf_text_length"] = text_length
+            stream_data["processing_stage"] = "PDF text extracted"
+        
+        # Add chunking progress
+        if "chunks" in state and state["chunks"]:
+            chunks_count = len(state["chunks"])
+            stream_data["chunks_count"] = chunks_count
+            stream_data["processing_stage"] = "Document chunked"
+        
+        # Add map phase progress
+        if "chunk_results" in state and state["chunk_results"]:
+            chunk_results_count = len(state["chunk_results"])
+            stream_data["chunk_results_count"] = chunk_results_count
+            stream_data["processing_stage"] = "Map phase complete"
+        
+        # Add reduce phase progress
+        if "aggregated_results" in state and state["aggregated_results"]:
+            aggregated_results = state["aggregated_results"]
+            stream_data["aggregated_results"] = aggregated_results
+            stream_data["processing_stage"] = "Reduce phase complete"
+            
+            # Count metrics
+            metrics_count = len(aggregated_results.get("metrics", []))
+            stream_data["metrics_count"] = metrics_count
+        
+        # Add final summary
+        if "final_summary" in state and state["final_summary"]:
+            stream_data["final_summary"] = state["final_summary"]
+            stream_data["processing_stage"] = "Analysis complete"
+            stream_data["status"] = "completed"
+        
+        # Only stream if we have meaningful data
+        if "processing_stage" in stream_data:
+            data_to_send = json.dumps(stream_data)
+            yield f"data: {data_to_send}\n\n"
+            await asyncio.sleep(0.1)
+    
+    # Send final completion event
+    final_data = json.dumps({
+        "type": "transcript_analysis_complete",
+        "thread_id": request.thread_id,
+        "status": "completed",
+        "file_path": request.file_path
+    })
+    yield f"data: {final_data}\n\n"
+
+
 @app.post("/research", response_model=ResearchResponse)
 async def research_query(request: ResearchRequest):
     """
@@ -149,6 +223,7 @@ async def research_query(request: ResearchRequest):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+ 
 
 @app.post("/extract-finance-data", response_model=None)
 async def extract_finance_data(request: FinanceDataRequest):
@@ -170,6 +245,33 @@ async def extract_finance_data(request: FinanceDataRequest):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing finance data extraction: {str(e)}")
+
+
+@app.post("/analyze-transcript")
+async def analyze_transcript_endpoint(request: TranscriptAnalysisRequest):
+    """
+    Analyze a transcript file using map-reduce pattern and return streaming results.
+    This endpoint streams the results using Server-Sent Events.
+    """
+    try:
+        # Validate file path exists
+        if not os.path.exists(request.file_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {request.file_path}")
+        
+        return StreamingResponse(
+            stream_transcript_analysis_results(request), 
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing transcript analysis: {str(e)}")
+
 
 @app.post("/extract-finance-data-sync", response_model=FinanceDataResponse)
 async def extract_finance_data_sync(request: FinanceDataRequest):
@@ -224,8 +326,57 @@ async def extract_finance_data_sync(request: FinanceDataRequest):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing finance data extraction: {str(e)}")
+    
 
-  
+@app.post("/analyze-transcript-sync", response_model=TranscriptAnalysisResponse)
+async def analyze_transcript_sync(request: TranscriptAnalysisRequest):
+    """
+    Non-streaming version of transcript analysis (for backward compatibility)
+    """
+    try:
+        # Validate file path exists
+        if not os.path.exists(request.file_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {request.file_path}")
+        
+        # Process the transcript analysis
+        final_summary = ""
+        aggregated_results = {}
+        error = None
+        
+        # Use the analyze_transcript async generator and collect final results
+        async for state in analyze_transcript(request.file_path, request.thread_id):
+            print(f"DEBUG API: Transcript analysis state keys: {list(state.keys())}")
+            
+            # Check for errors
+            if "error" in state and state["error"]:
+                error = state["error"]
+                break
+            
+            # Collect final results
+            if "final_summary" in state and state["final_summary"]:
+                final_summary = state["final_summary"]
+            
+            if "aggregated_results" in state and state["aggregated_results"]:
+                aggregated_results = state["aggregated_results"]
+        
+        # Check if we have an error
+        if error:
+            raise HTTPException(status_code=500, detail=error)
+        
+        return TranscriptAnalysisResponse(
+            file_path=request.file_path,
+            final_summary=final_summary or "No summary generated",
+            aggregated_results=aggregated_results or {},
+            thread_id=request.thread_id,
+            status="success",
+            error=None
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing transcript analysis: {str(e)}")
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001)

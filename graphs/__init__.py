@@ -13,11 +13,14 @@ dependency issues when using individual graph modules.
 # from .documentsummarygraph import create_document_summary_graph  
 # from .financedatagraph import create_finance_data_graph
 # from .pdf_table_extraction_graph import create_pdf_table_extraction_graph, extract_pdf_tables
+from .mapreduce_graph import create_transcript_mapreduce_graph, analyze_transcript
 
 __all__ = [
     "create_research_graph", 
     "create_document_summary_graph",
     "create_finance_data_graph",
     "create_pdf_table_extraction_graph",
-    "extract_pdf_tables"
+    "extract_pdf_tables",
+    "create_transcript_mapreduce_graph",
+    "analyze_transcript",
 ]

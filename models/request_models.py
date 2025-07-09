@@ -95,3 +95,22 @@ class FinanceDataRequest(BaseModel):
                 "thread_id": "finance_session_123"
             }
         }
+
+
+class TranscriptAnalysisRequest(BaseModel):
+    """
+    Request model for analyzing a transcript from a file path.
+    
+    Attributes:
+        file_path (str): The local path to the transcript file (e.g., PDF).
+        thread_id (str): Unique identifier for the conversation thread.
+    """
+    file_path: str = Field(
+        ...,
+        description="The local path to the transcript file to be analyzed.",
+        example="docs/2025/Q1/SHELL/QRAReport/q1-2025-qra-document.pdf"
+    )
+    thread_id: str = Field(
+        default="default-transcript",
+        description="Unique identifier for the transcript analysis thread."
+    )

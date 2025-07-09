@@ -14,6 +14,7 @@ try:
     from document_summarizer import show_document_summarizer, initialize_document_summarizer_session
     from document_upload_qa import show_document_summarizer as show_document_upload_qa, initialize_document_summarizer_session as init_upload_qa
     from table_extraction import show_table_extraction, initialize_table_extraction_session
+    from transcript_analysis import show_transcript_analysis, initialize_transcript_analysis_session
 except ImportError as e:
     st.error(f"Import error: {e}")
     st.stop()
@@ -34,6 +35,7 @@ if 'current_page' not in st.session_state:
 initialize_document_summarizer_session()
 init_upload_qa()
 initialize_table_extraction_session()
+initialize_transcript_analysis_session()
 
 def inject_premium_css():
     """Inject premium CSS styling"""
@@ -332,6 +334,9 @@ def create_premium_sidebar():
         elif st.session_state.current_page == "Table Extraction":
             create_table_extraction_metrics()
             create_table_extraction_actions()
+        elif st.session_state.current_page == "Transcript Analysis":
+            create_transcript_analysis_metrics()
+            create_transcript_analysis_actions()
         elif st.session_state.current_page == "Home":
             create_home_quick_actions()
         
@@ -346,8 +351,7 @@ def create_premium_sidebar():
 def create_premium_navigation():
     """Create premium navigation with enhanced styling"""
     st.markdown('<div class="nav-container">', unsafe_allow_html=True)
-    st.markdown('<div class="nav-title">🧭 Navigation</div>', unsafe_allow_html=True)
-      # Navigation options
+    st.markdown('<div class="nav-title">🧭 Navigation</div>', unsafe_allow_html=True)    # Navigation options
     nav_options = [
         {
             "icon": "🏠",
@@ -371,6 +375,12 @@ def create_premium_navigation():
             "title": "Table Extraction",
             "description": "Extract Tables from PDFs",
             "key": "Table Extraction"
+        },
+        {
+            "icon": "🎯", 
+            "title": "Transcript Analysis",
+            "description": "AI-Powered Financial Insights",
+            "key": "Transcript Analysis"
         }
     ]
     
@@ -752,6 +762,113 @@ def create_table_extraction_actions():
     
     st.markdown('</div>', unsafe_allow_html=True)
 
+def create_transcript_analysis_metrics():
+    """Create transcript analysis metrics"""
+    st.markdown('<div class="nav-container">', unsafe_allow_html=True)
+    st.markdown('<div class="nav-title">🎯 Analysis Metrics</div>', unsafe_allow_html=True)
+    
+    # Analysis complete metric
+    if st.session_state.get('transcript_analysis_complete', False):
+        metrics = st.session_state.get('transcript_analysis_metrics', {})
+        
+        # Chunks processed metric
+        chunks_processed = metrics.get('chunks_processed', 0)
+        if chunks_processed > 0:
+            st.markdown(f'''
+            <div class="metric-card">
+                <div class="metric-label">Chunks Processed</div>
+                <div class="metric-value">{chunks_processed}</div>
+                <div class="metric-desc">parallel analysis segments</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        # Processing efficiency metric
+        chunk_details = metrics.get('chunk_details', [])
+        if chunk_details:
+            successful_chunks = sum(1 for chunk in chunk_details if chunk.get("success", False))
+            efficiency = (successful_chunks / len(chunk_details)) * 100 if chunk_details else 0
+            st.markdown(f'''
+            <div class="metric-card">
+                <div class="metric-label">Processing Efficiency</div>
+                <div class="metric-value">{efficiency:.1f}%</div>
+                <div class="metric-desc">{successful_chunks}/{len(chunk_details)} chunks successful</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        # Results aggregated metric
+        results_aggregated = metrics.get('results_aggregated', 0)
+        if results_aggregated > 0:
+            st.markdown(f'''
+            <div class="metric-card">
+                <div class="metric-label">Results Aggregated</div>
+                <div class="metric-value">{results_aggregated}</div>
+                <div class="metric-desc">financial data points</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        # Text length metric
+        text_length = metrics.get('text_length', 0)
+        if text_length > 0:
+            st.markdown(f'''
+            <div class="metric-card">
+                <div class="metric-label">Text Analyzed</div>
+                <div class="metric-value">{text_length:,}</div>
+                <div class="metric-desc">characters processed</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        
+        # Last processed transcript
+        if 'last_processed_transcript' in st.session_state:
+            filename = st.session_state.last_processed_transcript
+            display_name = filename[:20] + "..." if len(filename) > 20 else filename
+            st.markdown(f'''
+            <div class="metric-card">
+                <div class="metric-label">Current Transcript</div>
+                <div class="metric-value" style="font-size: 1rem;">🎯 {display_name}</div>
+                <div class="metric-desc">financial analysis complete</div>
+            </div>
+            ''', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def create_transcript_analysis_actions():
+    """Create transcript analysis action buttons"""
+    st.markdown('<div class="nav-container">', unsafe_allow_html=True)
+    st.markdown('<div class="nav-title">⚡ Analysis Actions</div>', unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔄 Reset Analysis", help="Clear analysis session data", use_container_width=True):
+            # Clear transcript analysis session data
+            analysis_keys = [k for k in st.session_state.keys() if k.startswith('transcript_analysis_')]
+            for key in analysis_keys:
+                del st.session_state[key]
+            if 'last_processed_transcript' in st.session_state:
+                del st.session_state['last_processed_transcript']
+            st.success("✅ Analysis session cleared!")
+            st.rerun()
+    
+    with col2:
+        if st.button("📁 Browse Transcripts", help="View transcripts folder", use_container_width=True):
+            docs_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs")
+            if os.path.exists(docs_path):
+                st.info(f"📁 Documents folder: {docs_path}")
+            else:
+                st.warning("⚠️ Documents folder not found")
+    
+    # Additional actions
+    if st.button("📊 Export Analysis", help="Export analysis results", use_container_width=True, disabled=not st.session_state.get('transcript_analysis_complete', False)):
+        if st.session_state.get('transcript_analysis_complete', False):
+            st.info("🔜 Advanced export feature coming soon!")
+        else:
+            st.warning("⚠️ No analysis to export")
+    
+    if st.button("🎯 Quick Analysis", help="Start quick transcript analysis", use_container_width=True):
+        st.info("💡 Go to File Browser or Upload tab to analyze transcripts")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
 def main():
     """Main application with premium UI"""
     
@@ -765,6 +882,8 @@ def main():
         show_document_upload_qa()
     elif st.session_state.current_page == "Table Extraction":
         show_table_extraction()
+    elif st.session_state.current_page == "Transcript Analysis":
+        show_transcript_analysis()
         
         # Enhanced debug console
         if show_debug:

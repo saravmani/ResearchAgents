@@ -125,3 +125,65 @@ class FinanceDataResponse(BaseModel):
                 "raw_extraction": "[{\"metricName\": \"PERatio\", \"metricValue\": 22.34}]"
             }
         }
+
+
+class TranscriptAnalysisResponse(BaseModel):
+    """
+    Response model for transcript analysis results
+    
+    Attributes:
+        file_path (str): The path to the analyzed file
+        final_summary (str): The final summary of the analyzed transcript
+        aggregated_results (Dict[str, Any]): Structured aggregated results from the analysis
+        thread_id (str): The conversation thread identifier
+        status (str): The status of the request processing
+        error (Optional[str]): Error message if processing failed
+    """
+    
+    file_path: str = Field(
+        ..., 
+        description="The path to the analyzed file"
+    )
+    
+    final_summary: str = Field(
+        ..., 
+        description="The final summary of the analyzed transcript"
+    )
+    
+    aggregated_results: Dict[str, Any] = Field(
+        ..., 
+        description="Structured aggregated results from the analysis"
+    )
+    
+    thread_id: str = Field(
+        ..., 
+        description="The conversation thread identifier"
+    )
+    
+    status: str = Field(
+        ..., 
+        description="Status of the request processing",
+        example="success"
+    )
+    
+    error: Optional[str] = Field(
+        None, 
+        description="Error message if processing failed"
+    )
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "file_path": "docs/2025/Q1/SHELL/QRAReport/q1-2025-qra-document.pdf",
+                "final_summary": "Shell PLC Q1 2025 Financial Summary...",
+                "aggregated_results": {
+                    "metrics": [{"name": "Revenue", "value": "$10.2B", "period": "Q1 2025"}],
+                    "guidance": ["Expected growth in renewable energy segment"],
+                    "key_drivers": ["Higher oil prices", "Increased production"],
+                    "risks": ["Regulatory changes", "Market volatility"]
+                },
+                "thread_id": "transcript_session_123",
+                "status": "success",
+                "error": None
+            }
+        }
