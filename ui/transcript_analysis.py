@@ -83,11 +83,11 @@ def process_transcript_file(file_path: str) -> str:
         if st.session_state.transcript_analysis_graph is None:
             st.session_state.transcript_analysis_graph = create_transcript_mapreduce_graph()
             graph = st.session_state.transcript_analysis_graph
-        
-        # Create progress indicators
+          # Create progress indicators
         progress_bar = st.progress(0)
         status_text = st.empty()
         chunk_progress_container = st.empty()
+        individual_progress_container = st.empty()
         
         # Process the file
         status_text.text("📄 Starting transcript analysis...")
@@ -95,7 +95,6 @@ def process_transcript_file(file_path: str) -> str:
         
         final_result = ""
         config = {"configurable": {"thread_id": "transcript_analysis_session"}}
-        
         async def run_analysis():
             nonlocal final_result
             chunks_status = {}  # Track individual chunk progress
@@ -120,6 +119,9 @@ def process_transcript_file(file_path: str) -> str:
                     chunk_count = len(state["chunks"])
                     status_text.text(f"📝 Document chunked into {chunk_count} pieces...")
                     progress_bar.progress(40)
+                      # Initialize chunk status tracking
+                    for i in range(chunk_count):
+                        chunks_status[i + 1] = {"progress": 0, "success": False, "completed": False}
                 
                 if "chunk_results" in state and state["chunk_results"]:
                     # Show detailed progress for each chunk
@@ -129,28 +131,74 @@ def process_transcript_file(file_path: str) -> str:
                     # Count successful vs failed chunks
                     successful_chunks = 0
                     failed_chunks = 0
-                    for result in state["chunk_results"]:
-                        if result.get("extracted_data", {}).get("error"):
-                            failed_chunks += 1
-                        else:
-                            successful_chunks += 1
+                    chunk_details = []
                     
-                    # Display chunk progress in a nice format
-                    chunk_progress_container.markdown(f"""
-                    **🔍 Chunk Processing Progress:**
-                    - ✅ Successful: {successful_chunks}/{total_chunks}
-                    - ❌ Failed: {failed_chunks}/{total_chunks}
-                    - 📊 Overall: {results_count}/{total_chunks} chunks processed
-                    """)
+                    for result in state["chunk_results"]:
+                        if result.get("success", False):
+                            successful_chunks += 1
+                        else:
+                            failed_chunks += 1
+                        
+                        chunk_details.append({
+                            "number": result.get("chunk_number", 0),
+                            "success": result.get("success", False),
+                            "progress": result.get("progress", 0)
+                        })
+                    
+                    # Sort chunk details by chunk number
+                    chunk_details.sort(key=lambda x: x["number"])
+                    
+                    # Create a visual progress indicator for each chunk
+                    progress_text = "**🔍 Chunk Processing Progress:**\n"
+                    for detail in chunk_details:
+                        status_emoji = "✅" if detail["success"] else "❌"
+                        progress_text += f"- Chunk {detail['number']}: {status_emoji} ({detail['progress']:.1f}%)\n"
+                    
+                    progress_text += f"\n**Summary:**\n"
+                    progress_text += f"- ✅ Successful: {successful_chunks}/{total_chunks}\n"
+                    progress_text += f"- ❌ Failed: {failed_chunks}/{total_chunks}\n"
+                    progress_text += f"- 📊 Overall: {results_count}/{total_chunks} chunks processed"
+                      # Display chunk progress in a nice format
+                    chunk_progress_container.markdown(progress_text)
+                    
+                    # Create individual progress bars for each chunk
+                    if len(chunk_details) > 0:
+                        individual_progress_html = "<div style='margin-top: 10px;'>"
+                        individual_progress_html += "<h4>📊 Individual Chunk Progress:</h4>"
+                        
+                        for detail in chunk_details:
+                            chunk_num = detail['number']
+                            success = detail['success']
+                            progress = detail['progress']
+                            
+                            # Choose color based on success
+                            color = "#28a745" if success else "#dc3545"
+                            status_text_chunk = "✅ Complete" if success else "❌ Failed"
+                            
+                            individual_progress_html += f"""
+                            <div style='margin-bottom: 5px;'>
+                                <span style='font-weight: bold;'>Chunk {chunk_num}:</span>
+                                <div style='background-color: #f0f0f0; border-radius: 5px; height: 20px; margin: 2px 0;'>
+                                    <div style='background-color: {color}; width: {progress}%; height: 100%; border-radius: 5px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px;'>
+                                        {progress:.1f}% - {status_text_chunk}
+                                    </div>
+                                </div>
+                            </div>
+                            """
+                        
+                        individual_progress_html += "</div>"
+                        individual_progress_container.markdown(individual_progress_html, unsafe_allow_html=True)
                     
                     if failed_chunks > 0:
                         status_text.text(f"🔍 Processed {results_count}/{total_chunks} chunks (✅ {successful_chunks} success, ❌ {failed_chunks} failed)")
                     else:
                         status_text.text(f"🔍 Processed {results_count}/{total_chunks} chunks (✅ All successful)")
                     
-                    # Update progress based on chunk completion
-                    chunk_progress = 40 + (results_count / total_chunks) * 30  # 40-70% range
-                    progress_bar.progress(min(int(chunk_progress), 70))
+                    # Update progress based on chunk completion - more granular
+                    base_progress = 40  # Start after chunking
+                    chunk_range = 30    # 40-70% range for chunk processing
+                    current_progress = base_progress + (results_count / total_chunks) * chunk_range
+                    progress_bar.progress(min(int(current_progress), 70))
                 
                 if "aggregated_results" in state and state["aggregated_results"]:
                     status_text.text("📊 Aggregating and deduplicating results...")
@@ -186,11 +234,11 @@ def process_transcript_file(file_path: str) -> str:
           # Run the async analysis
         import asyncio
         asyncio.run(run_analysis())
-        
-        # Clear progress indicators
+          # Clear progress indicators
         progress_bar.empty()
         status_text.empty()
         chunk_progress_container.empty()
+        individual_progress_container.empty()
         
         return final_result
         

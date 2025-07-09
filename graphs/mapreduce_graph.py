@@ -1,7 +1,11 @@
 import asyncio
+import operator
 from typing import TypedDict, Annotated, List, Dict, Any
 from langgraph.graph import StateGraph, START, END
+from langgraph.constants import Send
 from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chat_models import init_chat_model
 import json
@@ -13,12 +17,17 @@ class TranscriptMapReduceState(TypedDict):
     file_path: str
     transcript_text: str
     chunks: List[str]
-    # The `chunk_results` will now be a list of dictionaries, 
-    # where each dictionary is the result of the map_phase_extractor
-    chunk_results: List[Dict]
+    # Using operator.add to combine all chunk results - this is the "reduce" part
+    chunk_results: Annotated[List[Dict], operator.add]
     aggregated_results: Dict[str, Any]
     final_summary: str
     error: str
+
+# Individual chunk processing state
+class ChunkState(TypedDict):
+    chunk_content: str
+    chunk_number: int
+    total_chunks: int
 
 # New Node: Extract text from PDF
 def extract_pdf_text(state: TranscriptMapReduceState) -> TranscriptMapReduceState:
@@ -50,7 +59,7 @@ def chunk_document(state: TranscriptMapReduceState) -> TranscriptMapReduceState:
     if not text:
         return {**state, "error": "No text to chunk."}
 
-    # Limit to first 3000 tokens for POC
+    # Limit to first 10000 characters for better processing
     text = text[:3000]
 
     text_splitter = RecursiveCharacterTextSplitter(
@@ -71,12 +80,37 @@ def chunk_document(state: TranscriptMapReduceState) -> TranscriptMapReduceState:
         "error": ""
     }
 
-# Node 2: Parallel extraction from each chunk (Map phase)
-async def map_phase_extractor(chunk: str) -> Dict[str, Any]:
+# Map function: defines the logic to map out over the document chunks
+def map_chunks(state: TranscriptMapReduceState):
+    """Map function that sends each chunk to be processed in parallel."""
+    print("--- Step 2: Mapping Chunks for Parallel Processing ---")
+    
+    chunks = state.get("chunks", [])
+    if not chunks:
+        return []
+    
+    # Return a list of Send objects for parallel processing
+    return [
+        Send("process_chunk", {
+            "chunk_content": chunk,
+            "chunk_number": i + 1,
+            "total_chunks": len(chunks)
+        })
+        for i, chunk in enumerate(chunks)
+    ]
+
+# Node 2: Process individual chunk (Map phase)
+async def process_chunk(state: ChunkState) -> Dict[str, Any]:
     """
-    Extracts financial information from a single chunk of text using an LLM.
+    Processes a single chunk of text to extract financial information.
     """
-    print(f"--- Step 2: Processing Chunk (Map Phase) ---")
+    chunk_content = state["chunk_content"]
+    chunk_number = state["chunk_number"]
+    total_chunks = state["total_chunks"]
+    print(f"🔍 Processing chunk {chunk_number}/{total_chunks}")
+    
+    # Calculate progress percentage for this chunk - show it as completed when done
+    chunk_progress = 100.0  # Each chunk shows 100% when completed
     
     system_prompt = """You are an expert financial analyst. Your task is to extract key financial metrics, insights, and forward-looking statements from the provided text chunk of an earnings call transcript.
 
@@ -97,103 +131,51 @@ Present the extracted information in a structured JSON format. For example:
 }
 """
     
-    model = init_chat_model("groq:llama3-8b-8192", temperature=0.1)
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=chunk)
-    ]
-    
     try:
+        model = init_chat_model("groq:llama3-8b-8192", temperature=0.1)
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=chunk_content)
+        ]
         response = await model.ainvoke(messages)
-        # Attempt to parse the JSON output
         extracted_data = json.loads(response.content)
-        return {"extracted_data": extracted_data}
-    except (json.JSONDecodeError, TypeError) as e:
-        print(f"Error parsing LLM response for chunk: {e}")
-        # Fallback to returning raw text if JSON parsing fails
-        return {"extracted_data": {"raw_text": response.content}}
-    except Exception as e:
-        print(f"An unexpected error occurred during extraction: {e}")
-        return {"extracted_data": {"error": str(e)}}
-
-
-async def map_phase(state: TranscriptMapReduceState) -> dict:
-    """
-    Asynchronously runs the extractor on all chunks in parallel with progress tracking.
-    """
-    print("--- Step 2: Processing Chunks in Parallel (Map Phase) ---")
-    
-    chunks = state["chunks"]
-    total_chunks = len(chunks)
-    
-    # Create tasks for parallel processing
-    tasks = []
-    for i, chunk in enumerate(chunks):
-        task = map_phase_extractor_with_progress(chunk, i + 1, total_chunks)
-        tasks.append(task)
-    
-    # Process all chunks in parallel
-    chunk_results = await asyncio.gather(*tasks)
-    
-    print(f"✅ Completed processing all {len(chunk_results)} chunks.")
-    
-    return {"chunk_results": chunk_results}
-
-async def map_phase_extractor_with_progress(chunk: str, chunk_number: int, total_chunks: int) -> Dict[str, Any]:
-    """
-    Extracts financial information from a single chunk with progress tracking.
-    """
-    print(f"🔍 Processing chunk {chunk_number}/{total_chunks} (Map Phase)")
-    
-    system_prompt = """You are an expert financial analyst. Your task is to extract key financial metrics, insights, and forward-looking statements from the provided text chunk of an earnings call transcript.
-
-Focus on the following:
-- **Key Financial Metrics**: Revenue, Net Income, EPS, Margins, etc.
-- **Guidance/Outlook**: Any forward-looking statements about future performance.
-- **Key Business Drivers**: What is driving performance? New products, market trends, etc.
-- **Risks and Challenges**: Any mentioned risks or headwinds.
-- **Management Tone**: Is the tone optimistic, cautious, or pessimistic?
-
-Present the extracted information in a structured JSON format. For example:
-{
-  "metrics": [{"name": "Revenue", "value": "10B", "period": "Q4 2024"}],
-  "guidance": "Company expects 10% revenue growth in the next quarter.",
-  "key_drivers": ["Strong cloud segment growth", "New AI product adoption"],
-  "risks": ["Macroeconomic uncertainty", "Supply chain constraints"],
-  "tone": "Optimistic"
-}
-"""
-    
-    model = init_chat_model("groq:llama3-8b-8192", temperature=0.1)
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=chunk)
-    ]
-    
-    try:
-        response = await model.ainvoke(messages)
-        # Attempt to parse the JSON output
-        extracted_data = json.loads(response.content)
+        
         print(f"✅ Chunk {chunk_number}/{total_chunks} processed successfully")
+        
         return {
-            "extracted_data": extracted_data,
-            "chunk_number": chunk_number,
-            "total_chunks": total_chunks
+            "chunk_results": [{
+                "chunk_number": chunk_number,
+                "total_chunks": total_chunks,
+                "extracted_data": extracted_data,
+                "success": True,
+                "progress": chunk_progress
+            }]
         }
+        
     except (json.JSONDecodeError, TypeError) as e:
         print(f"⚠️ Chunk {chunk_number}/{total_chunks} - JSON parsing error: {e}")
-        # Fallback to returning raw text if JSON parsing fails
         return {
-            "extracted_data": {"raw_text": response.content},
-            "chunk_number": chunk_number,
-            "total_chunks": total_chunks
+            "chunk_results": [{
+                "chunk_number": chunk_number,
+                "total_chunks": total_chunks,
+                "extracted_data": {"raw_text": response.content if 'response' in locals() else "No response"},
+                "success": False,
+                "error": str(e),
+                "progress": chunk_progress
+            }]
         }
+        
     except Exception as e:
         print(f"❌ Chunk {chunk_number}/{total_chunks} - Error: {e}")
         return {
-            "extracted_data": {"error": str(e)},
-            "chunk_number": chunk_number,
-            "total_chunks": total_chunks
+            "chunk_results": [{
+                "chunk_number": chunk_number,
+                "total_chunks": total_chunks,
+                "extracted_data": {"error": str(e)},
+                "success": False,
+                "error": str(e),
+                "progress": chunk_progress
+            }]
         }
 
 
@@ -293,14 +275,14 @@ def create_transcript_mapreduce_graph():
     
     workflow.add_node("extract_pdf_text", extract_pdf_text)
     workflow.add_node("chunk_document", chunk_document)
-    workflow.add_node("map_phase", map_phase)
+    workflow.add_node("process_chunk", process_chunk)
     workflow.add_node("reduce_aggregator", reduce_phase_aggregator)
     workflow.add_node("generate_summary", generate_final_summary)
     
     workflow.add_edge(START, "extract_pdf_text")
     workflow.add_edge("extract_pdf_text", "chunk_document")
-    workflow.add_edge("chunk_document", "map_phase")
-    workflow.add_edge("map_phase", "reduce_aggregator")
+    workflow.add_conditional_edges("chunk_document", map_chunks, ["process_chunk"])
+    workflow.add_edge("process_chunk", "reduce_aggregator")
     workflow.add_edge("reduce_aggregator", "generate_summary")
     workflow.add_edge("generate_summary", END)
     
