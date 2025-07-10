@@ -75,8 +75,25 @@ def initialize_transcript_analysis_session():
     
     if 'transcript_analysis_metrics' not in st.session_state:
         st.session_state.transcript_analysis_metrics = {}
+    
+    if 'transcript_analysis_needs_review' not in st.session_state:
+        st.session_state.transcript_analysis_needs_review = False
+    
+    if 'transcript_analysis_pending_review' not in st.session_state:
+        st.session_state.transcript_analysis_pending_review = {}
+    
+    if 'transcript_analysis_validation' not in st.session_state:
+        st.session_state.transcript_analysis_validation = {}
+    
+    if 'transcript_analysis_rules' not in st.session_state:
+        st.session_state.transcript_analysis_rules = """Rules for financial transcript analysis:
+1. Revenue figures must be clearly stated with period
+2. EPS data should include comparison to previous period
+3. Guidance statements must be explicitly mentioned
+4. Risk factors should be specific and actionable
+5. Management tone assessment should be objective"""
 
-def process_transcript_file(file_path: str) -> str:
+def process_transcript_file(file_path: str, analysis_rules: str = "") -> str:
     """Process transcript file using the map-reduce graph"""
     try:
         # Initialize graph if not exists
@@ -100,7 +117,7 @@ def process_transcript_file(file_path: str) -> str:
             nonlocal final_result
             chunks_status = {}  # Track individual chunk progress
             
-            async for state in analyze_transcript(file_path, "transcript_analysis_session"):
+            async for state in analyze_transcript(file_path, "transcript_analysis_session", analysis_rules):
                 # Update progress based on processing stage
                 if "error" in state and state["error"]:
                     status_text.text(f"❌ Error: {state['error']}")
@@ -155,6 +172,41 @@ def process_transcript_file(file_path: str) -> str:
                 if "aggregated_results" in state and state["aggregated_results"]:
                     status_text.text("📊 Aggregating and deduplicating results...")
                     progress_bar.progress(80)
+                  # Check for human review requirement
+                if "human_review_required" in state and state["human_review_required"]:
+                    status_text.text("👤 Human review required - please check below...")
+                    progress_bar.progress(90)
+                    
+                    # Store the state for human review
+                    st.session_state.transcript_analysis_pending_review = {
+                        "validation_feedback": state["validation_feedback"],
+                        "rules_validation": state.get("rules_validation", {}),
+                        "summary": state.get("final_summary", ""),
+                        "aggregated_data": state.get("aggregated_results", {}),
+                        "full_state": state
+                    }
+                    
+                    st.session_state.transcript_analysis_needs_review = True
+                    final_result = "PENDING_REVIEW"
+                    return
+                
+                # Check for rules validation
+                if "rules_validation" in state and state["rules_validation"]:
+                    rules_validation = state["rules_validation"]
+                    if not rules_validation.get("overall_satisfaction", True):
+                        status_text.text("⚠️ Rules validation failed - human review required...")
+                        progress_bar.progress(85)
+                        
+                        # Store validation results for UI display
+                        st.session_state.transcript_analysis_validation = rules_validation
+                    else:
+                        status_text.text("✅ Rules validation passed!")
+                        progress_bar.progress(90)
+                
+                # Check for validation feedback without human review required
+                if "validation_feedback" in state and state["validation_feedback"] and not state.get("human_review_required", False):
+                    status_text.text("✅ Validation completed!")
+                    progress_bar.progress(95)
                 
                 if "final_summary" in state and state["final_summary"]:
                     status_text.text("✅ Final summary generated!")
@@ -181,7 +233,9 @@ def process_transcript_file(file_path: str) -> str:
                         "text_length": len(state.get("transcript_text", "")),
                         "summary_length": len(state.get("final_summary", "")),
                         "aggregated_data": state.get("aggregated_results", {}),
-                        "chunk_details": chunk_metrics
+                        "chunk_details": chunk_metrics,
+                        "rules_validation": state.get("rules_validation", {}),
+                        "validation_feedback": state.get("validation_feedback", "")
                     }
           # Run the async analysis
         import asyncio
@@ -200,230 +254,364 @@ def process_transcript_file(file_path: str) -> str:
 
 def show_transcript_analysis():
     """Main function to display the transcript analysis page"""
+    # Initialize session state
+    initialize_transcript_analysis_session()
+    
     st.title("📊 Transcript Analysis")
-    st.markdown("Extract financial insights from earning calls and transcripts using AI-powered map-reduce analysis.")
+    st.markdown("Extract financial insights from earning calls and transcripts using AI-powered map-reduce analysis.")    # Rules section
+    st.markdown("### 📋 Analysis Rules")
+    rules_text = st.text_area(
+        "Define validation rules for the analysis (optional):",
+        value=st.session_state.get('transcript_analysis_rules', """Rules for financial transcript analysis:
+1. Revenue figures must be clearly stated with period
+2. EPS data should include comparison to previous period
+3. Guidance statements must be explicitly mentioned
+4. Risk factors should be specific and actionable
+5. Management tone assessment should be objective"""),
+        height=150,
+        help="Define rules that the analysis should follow. If these rules are not satisfied, you'll be prompted to review the results."
+    )
     
-    # Create tabs for different input methods
-    tab1, tab2, tab3 = st.tabs(["📁 File Browser", "📤 Upload", "📊 Results"])
+    # Store rules in session state
+    st.session_state.transcript_analysis_rules = rules_text
     
-    with tab1:
-        st.markdown("### 📁 Browse Available Documents")
+    # File browser section
+    st.markdown("### 📁 Browse Available Documents")
+    
+    # Document browser
+    docs_path = os.path.join(parent_dir, "docs")
+    if os.path.exists(docs_path):
+        # Walk through directory structure
+        files_found = []
+        for root, dirs, files in os.walk(docs_path):
+            for file in files:
+                if file.lower().endswith(('.pdf', '.txt', '.docx', '.doc')):
+                    rel_path = os.path.relpath(os.path.join(root, file), parent_dir)
+                    files_found.append(rel_path)
         
-        # Document browser
-        docs_path = os.path.join(parent_dir, "docs")
-        if os.path.exists(docs_path):
-            # Walk through directory structure
-            files_found = []
-            for root, dirs, files in os.walk(docs_path):
-                for file in files:
-                    if file.lower().endswith(('.pdf', '.txt', '.docx', '.doc')):
-                        rel_path = os.path.relpath(os.path.join(root, file), parent_dir)
-                        files_found.append(rel_path)
+        if files_found:
+            st.info(f"Found {len(files_found)} documents in the docs folder")
             
-            if files_found:
-                st.info(f"Found {len(files_found)} documents in the docs folder")
-                
-                # Create a selectbox for file selection
-                selected_file = st.selectbox(
-                    "Select a document to analyze:",
-                    [""] + files_found,
-                    format_func=lambda x: "Select a file..." if x == "" else os.path.basename(x)
-                )
-                
-                if selected_file:
-                    file_path = os.path.join(parent_dir, selected_file)
-                    
-                    # Display file information
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("📄 File Type", get_file_type(selected_file))
-                    with col2:
-                        if os.path.exists(file_path):
-                            file_size = os.path.getsize(file_path)
-                            st.metric("📊 File Size", format_file_size(file_size))
-                    with col3:
-                        st.metric("📁 Location", os.path.dirname(selected_file))
-                    
-                    # Process button
-                    if st.button("🚀 Analyze Transcript", type="primary", use_container_width=True):
-                        with st.spinner("Processing transcript..."):
-                            result = process_transcript_file(file_path)
-                            if result and not result.startswith("Error"):
-                                st.session_state.transcript_analysis_result = result
-                                st.session_state.transcript_analysis_complete = True
-                                st.session_state.last_processed_transcript = os.path.basename(selected_file)
-                                st.success("✅ Transcript analysis completed!")
-                                st.rerun()
-                            else:
-                                st.session_state.transcript_analysis_error = result
-                                st.error(f"❌ {result}")
-            else:
-                st.warning("⚠️ No supported documents found in the docs folder.")
-                st.info("💡 Supported formats: PDF, TXT, DOCX, DOC")
-        else:
-            st.error("❌ Documents folder not found. Please create a 'docs' folder in the project root.")
-    
-    with tab2:
-        st.markdown("### 📤 Upload New Document")
-        
-        uploaded_file = st.file_uploader(
-            "Choose a transcript file",
-            type=['pdf', 'txt', 'docx', 'doc'],
-            help="Upload earnings call transcripts or financial documents"
-        )
-        
-        if uploaded_file is not None:
-            # Display file information
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("📄 File Type", get_file_type(uploaded_file.name))
-            with col2:
-                st.metric("📊 File Size", format_file_size(uploaded_file.size))
-            with col3:
-                st.metric("📝 Filename", uploaded_file.name)
+            # Create a selectbox for file selection
+            selected_file = st.selectbox(
+                "Select a document to analyze:",
+                [""] + files_found,
+                format_func=lambda x: "Select a file..." if x == "" else os.path.basename(x)
+            )
             
-            # Save uploaded file temporarily
-            if st.button("🚀 Analyze Uploaded Transcript", type="primary", use_container_width=True):
-                # Create temp directory if it doesn't exist
-                temp_dir = os.path.join(parent_dir, "temp")
-                os.makedirs(temp_dir, exist_ok=True)
+            if selected_file:
+                file_path = os.path.join(parent_dir, selected_file)
                 
-                # Save uploaded file
-                temp_path = os.path.join(temp_dir, uploaded_file.name)
-                with open(temp_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                
-                with st.spinner("Processing uploaded transcript..."):
-                    result = process_transcript_file(temp_path)
-                    if result and not result.startswith("Error"):
-                        st.session_state.transcript_analysis_result = result
-                        st.session_state.transcript_analysis_complete = True
-                        st.session_state.last_processed_transcript = uploaded_file.name
-                        st.success("✅ Transcript analysis completed!")
-                        st.rerun()
-                    else:
-                        st.session_state.transcript_analysis_error = result
-                        st.error(f"❌ {result}")
-                
-                # Clean up temp file
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
-    
-    with tab3:
-        st.markdown("### 📊 Analysis Results")
-        
-        if st.session_state.transcript_analysis_complete and st.session_state.transcript_analysis_result:
-            # Display metrics
-            if st.session_state.transcript_analysis_metrics:
-                metrics = st.session_state.transcript_analysis_metrics
-                
-                col1, col2, col3, col4 = st.columns(4)
+                # Display file information
+                col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("📝 Chunks Processed", metrics.get("chunks_processed", 0))
+                    st.metric("📄 File Type", get_file_type(selected_file))
                 with col2:
-                    st.metric("🔍 Results Aggregated", metrics.get("results_aggregated", 0))
+                    if os.path.exists(file_path):
+                        file_size = os.path.getsize(file_path)
+                        st.metric("📊 File Size", format_file_size(file_size))
                 with col3:
-                    st.metric("📊 Text Length", f"{metrics.get('text_length', 0):,}")
-                with col4:
-                    st.metric("📋 Summary Length", f"{metrics.get('summary_length', 0):,}")
-              # Display the analysis result
-            st.markdown("#### 🎯 Financial Analysis Summary")
-            st.markdown(st.session_state.transcript_analysis_result)
+                    st.metric("📁 Location", os.path.dirname(selected_file))
+                  # Process button
+                if st.button("🚀 Analyze Transcript", type="primary", use_container_width=True):
+                    with st.spinner("Processing transcript..."):
+                        # Get the analysis rules from session state
+                        analysis_rules = st.session_state.get('transcript_analysis_rules', '')
+                        result = process_transcript_file(file_path, analysis_rules)
+                        
+                        if result == "PENDING_REVIEW":
+                            # Handle human review required case
+                            st.session_state.transcript_analysis_result = "Analysis requires human review"
+                            st.session_state.transcript_analysis_complete = False
+                            st.session_state.transcript_analysis_needs_review = True
+                            st.rerun()
+                        elif result and not result.startswith("Error"):
+                            st.session_state.transcript_analysis_result = result
+                            st.session_state.transcript_analysis_complete = True
+                            st.session_state.last_processed_transcript = os.path.basename(selected_file)
+                            st.success("✅ Transcript analysis completed!")
+                            st.rerun()                            
+                        else:
+                            st.session_state.transcript_analysis_error = result
+                            st.error(f"❌ {result}")
+        else:
+            st.warning("⚠️ No supported documents found in the docs folder.")
+            st.info("💡 Supported formats: PDF, TXT, DOCX, DOC")
+    else:
+        st.error("❌ Documents folder not found. Please create a 'docs' folder in the project root.")
+    
+    # Show human review section if needed
+    if st.session_state.get('transcript_analysis_needs_review', False):
+        st.markdown("---")
+        st.markdown("## 👤 Human Review Required")
+        
+        pending_review = st.session_state.get('transcript_analysis_pending_review', {})
+        if pending_review:
+            st.warning("⚠️ The analysis did not satisfy all defined rules and requires human review.")
             
-            # Display aggregated data if available
-            if st.session_state.transcript_analysis_metrics.get("aggregated_data"):
-                with st.expander("📊 Detailed Extracted Data", expanded=False):
-                    aggregated_data = st.session_state.transcript_analysis_metrics["aggregated_data"]
-                    
-                    # Show different categories
-                    for category, items in aggregated_data.items():
-                        if items:
-                            st.markdown(f"**{category.replace('_', ' ').title()}:**")
-                            if isinstance(items, list):
-                                for item in items:
-                                    if isinstance(item, dict):
-                                        st.json(item)
-                                    else:
-                                        st.write(f"- {item}")
-                            else:
-                                st.write(items)
-                            st.markdown("---")
+            # Show validation results
+            rules_validation = pending_review.get('rules_validation', {})
+            if 'rule_assessments' in rules_validation:
+                st.markdown("### 📋 Rules Assessment")
+                for assessment in rules_validation['rule_assessments']:
+                    status = "✅" if assessment.get("satisfied", True) else "❌"
+                    st.markdown(f"{status} **{assessment.get('rule', 'Unknown rule')}**: {assessment.get('feedback', 'No feedback')}")
             
-            # Display chunk processing details
-            if st.session_state.transcript_analysis_metrics.get("chunk_details"):
-                with st.expander("🔍 Chunk Processing Details", expanded=False):
-                    chunk_details = st.session_state.transcript_analysis_metrics["chunk_details"]
-                    
-                    # Summary statistics
-                    successful_chunks = sum(1 for chunk in chunk_details if chunk["success"])
-                    failed_chunks = len(chunk_details) - successful_chunks
-                    total_metrics = sum(chunk["metrics_count"] for chunk in chunk_details)
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("✅ Successful Chunks", successful_chunks)
-                    with col2:
-                        st.metric("❌ Failed Chunks", failed_chunks)
-                    with col3:
-                        st.metric("📊 Total Metrics Found", total_metrics)
-                    
-                    # Detailed chunk breakdown
-                    st.markdown("**Individual Chunk Results:**")
-                    for chunk in chunk_details:
-                        status_icon = "✅" if chunk["success"] else "❌"
-                        st.markdown(f"""
-                        **Chunk {chunk['chunk_number']}** {status_icon}
-                        - 📊 Metrics: {chunk['metrics_count']}
-                        - 🎯 Guidance: {"Yes" if chunk['has_guidance'] else "No"}
-                        - 🚀 Drivers: {chunk['drivers_count']}
-                        - ⚠️ Risks: {chunk['risks_count']}
-                        """)
-                    
-                    # Show processing efficiency
-                    if len(chunk_details) > 0:
-                        efficiency = (successful_chunks / len(chunk_details)) * 100
-                        st.metric("🎯 Processing Efficiency", f"{efficiency:.1f}%")
+            if 'recommendations' in rules_validation:
+                st.markdown("### 💡 Recommendations")
+                for rec in rules_validation['recommendations']:
+                    st.markdown(f"• {rec}")
             
-            # Download options
-            st.markdown("#### 💾 Export Options")
-            col1, col2 = st.columns(2)
+            # Show the analysis summary for review
+            summary = pending_review.get('summary', '')
+            if summary:
+                st.markdown("### 📄 Analysis Summary for Review")
+                st.markdown(summary)
+              # Human approval buttons
+            st.markdown("### 🎯 Your Decision")
+            col1, col2, col3 = st.columns(3)
             
             with col1:
-                # Download as text
-                if st.download_button(
-                    label="📝 Download Summary",
-                    data=st.session_state.transcript_analysis_result,
-                    file_name=f"transcript_analysis_{int(time.time())}.txt",
-                    mime="text/plain",
-                    use_container_width=True
-                ):
-                    st.success("✅ Summary downloaded!")
+                if st.button("✅ Approve Analysis", type="primary", use_container_width=True):
+                    # Approve the analysis and continue
+                    with st.spinner("Finalizing approved analysis..."):
+                        result = continue_analysis_with_approval(True, "Analysis approved by human reviewer")
+                        if result and not result.startswith("Error") and not result.startswith("Analysis rejected"):
+                            st.session_state.transcript_analysis_result = result
+                            st.session_state.transcript_analysis_complete = True
+                            st.session_state.transcript_analysis_needs_review = False
+                            st.session_state.transcript_analysis_pending_review = {}
+                            st.success("✅ Analysis approved and completed!")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {result}")
             
             with col2:
-                # Download as JSON
-                if st.session_state.transcript_analysis_metrics.get("aggregated_data"):
-                    json_data = json.dumps(st.session_state.transcript_analysis_metrics["aggregated_data"], indent=2)
-                    if st.download_button(
-                        label="📊 Download Data (JSON)",
-                        data=json_data,
-                        file_name=f"transcript_data_{int(time.time())}.json",
-                        mime="application/json",
-                        use_container_width=True
-                    ):
-                        st.success("✅ Data downloaded!")
-        
-        elif st.session_state.transcript_analysis_error:
-            st.error(f"❌ {st.session_state.transcript_analysis_error}")
-        
-        else:
-            st.info("🔍 No analysis results yet. Please analyze a transcript first.")
+                if st.button("❌ Reject Analysis", use_container_width=True):
+                    # Reject the analysis
+                    st.session_state.transcript_analysis_result = ""
+                    st.session_state.transcript_analysis_complete = False
+                    st.session_state.transcript_analysis_needs_review = False
+                    st.session_state.transcript_analysis_pending_review = {}
+                    st.session_state.transcript_analysis_error = "Analysis rejected by human reviewer"
+                    st.error("❌ Analysis rejected. Please try again with different rules or document.")
+                    st.rerun()
             
-            # Show sample files if available
-            st.markdown("#### 📋 Quick Start")
-            st.markdown("To get started:")
-            st.markdown("1. 📁 Browse available documents in the **File Browser** tab")
-            st.markdown("2. 📤 Upload a new transcript in the **Upload** tab")
-            st.markdown("3. 🚀 Click **Analyze Transcript** to process the document")
-            st.markdown("4. 📊 View results in this **Results** tab")
+            with col3:
+                if st.button("🔄 Retry Analysis", use_container_width=True):
+                    # Clear states to allow retry
+                    st.session_state.transcript_analysis_result = ""
+                    st.session_state.transcript_analysis_complete = False
+                    st.session_state.transcript_analysis_needs_review = False
+                    st.session_state.transcript_analysis_pending_review = {}
+                    st.info("💡 Modify the rules above and click 'Analyze Transcript' to retry.")
+                    st.rerun()
+
+    # Show results at the bottom if analysis is complete
+    if st.session_state.transcript_analysis_complete and st.session_state.transcript_analysis_result:
+        st.markdown("---")
+        st.markdown("## 📊 Analysis Results")
+        
+        # Display metrics
+        if st.session_state.transcript_analysis_metrics:
+            metrics = st.session_state.transcript_analysis_metrics
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("📝 Chunks Processed", metrics.get("chunks_processed", 0))
+            with col2:
+                st.metric("🔍 Results Aggregated", metrics.get("results_aggregated", 0))
+            with col3:
+                st.metric("📊 Text Length", f"{metrics.get('text_length', 0):,}")
+            with col4:
+                st.metric("📋 Summary Length", f"{metrics.get('summary_length', 0):,}")
+          # Display the analysis result
+        st.markdown("#### 🎯 Financial Analysis Summary")
+        st.markdown(st.session_state.transcript_analysis_result)
+        
+        # Show rules validation results if available
+        if st.session_state.transcript_analysis_metrics.get("rules_validation"):
+            rules_validation = st.session_state.transcript_analysis_metrics["rules_validation"]
+            
+            with st.expander("📋 Rules Validation Results", expanded=False):
+                overall_satisfaction = rules_validation.get("overall_satisfaction", True)
+                status_icon = "✅" if overall_satisfaction else "❌"
+                st.markdown(f"**Overall Satisfaction:** {status_icon} {'Passed' if overall_satisfaction else 'Failed'}")
+                
+                if "rule_assessments" in rules_validation:
+                    st.markdown("**Individual Rule Assessment:**")
+                    for assessment in rules_validation["rule_assessments"]:
+                        status = "✅" if assessment.get("satisfied", True) else "❌"
+                        st.markdown(f"{status} **{assessment.get('rule', 'Unknown rule')}**")
+                        st.markdown(f"   ➤ {assessment.get('feedback', 'No feedback')}")
+                
+                if "recommendations" in rules_validation:
+                    st.markdown("**Recommendations:**")
+                    for rec in rules_validation["recommendations"]:
+                        st.markdown(f"• {rec}")
+                
+                if st.session_state.transcript_analysis_metrics.get("validation_feedback"):
+                    st.markdown(f"**Validation Feedback:** {st.session_state.transcript_analysis_metrics['validation_feedback']}")
+        
+        # Display aggregated data if available
+        if st.session_state.transcript_analysis_metrics.get("aggregated_data"):
+            with st.expander("📊 Detailed Extracted Data", expanded=False):
+                aggregated_data = st.session_state.transcript_analysis_metrics["aggregated_data"]
+                
+                # Show different categories
+                for category, items in aggregated_data.items():
+                    if items:
+                        st.markdown(f"**{category.replace('_', ' ').title()}:**")
+                        if isinstance(items, list):
+                            for item in items:
+                                if isinstance(item, dict):
+                                    st.json(item)
+                                else:
+                                    st.write(f"- {item}")
+                        else:
+                            st.write(items)
+                        st.markdown("---")
+        
+        # Display chunk processing details
+        if st.session_state.transcript_analysis_metrics.get("chunk_details"):
+            with st.expander("🔍 Chunk Processing Details", expanded=False):
+                chunk_details = st.session_state.transcript_analysis_metrics["chunk_details"]
+                
+                # Summary statistics
+                successful_chunks = sum(1 for chunk in chunk_details if chunk["success"])
+                failed_chunks = len(chunk_details) - successful_chunks
+                total_metrics = sum(chunk["metrics_count"] for chunk in chunk_details)
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("✅ Successful Chunks", successful_chunks)
+                with col2:
+                    st.metric("❌ Failed Chunks", failed_chunks)
+                with col3:
+                    st.metric("📊 Total Metrics Found", total_metrics)
+                
+                # Detailed chunk breakdown
+                st.markdown("**Individual Chunk Results:**")
+                for chunk in chunk_details:
+                    status_icon = "✅" if chunk["success"] else "❌"
+                    st.markdown(f"""
+                    **Chunk {chunk['chunk_number']}** {status_icon}
+                    - 📊 Metrics: {chunk['metrics_count']}
+                    - 🎯 Guidance: {"Yes" if chunk['has_guidance'] else "No"}
+                    - 🚀 Drivers: {chunk['drivers_count']}
+                    - ⚠️ Risks: {chunk['risks_count']}
+                    """)
+                
+                # Show processing efficiency
+                if len(chunk_details) > 0:
+                    efficiency = (successful_chunks / len(chunk_details)) * 100
+                    st.metric("🎯 Processing Efficiency", f"{efficiency:.1f}%")
+        
+        # Download options
+        st.markdown("#### 💾 Export Options")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Download as text
+            if st.download_button(
+                label="📝 Download Summary",
+                data=st.session_state.transcript_analysis_result,
+                file_name=f"transcript_analysis_{int(time.time())}.txt",
+                mime="text/plain",
+                use_container_width=True
+            ):
+                st.success("✅ Summary downloaded!")
+        
+        with col2:
+            # Download as JSON
+            if st.session_state.transcript_analysis_metrics.get("aggregated_data"):
+                json_data = json.dumps(st.session_state.transcript_analysis_metrics["aggregated_data"], indent=2)
+                if st.download_button(
+                    label="📊 Download Data (JSON)",
+                    data=json_data,
+                    file_name=f"transcript_data_{int(time.time())}.json",
+                    mime="application/json",
+                    use_container_width=True                ):
+                    st.success("✅ Data downloaded!")
+    
+    elif st.session_state.transcript_analysis_error:
+        st.markdown("---")
+        st.error(f"❌ {st.session_state.transcript_analysis_error}")
+    
+    elif not st.session_state.transcript_analysis_complete:
+        st.markdown("---")
+        st.info("🔍 Select a document above and click 'Analyze Transcript' to begin processing.")
+
+def continue_analysis_with_approval(approval: bool, feedback: str = "") -> str:
+    """Continue the analysis after human approval"""
+    try:
+        pending_review = st.session_state.get('transcript_analysis_pending_review', {})
+        if not pending_review:
+            return "Error: No pending review found"
+        
+        # Get the stored state
+        current_state = pending_review.get('full_state', {})
+        
+        # Update the state with human approval
+        current_state['human_approval'] = approval
+        if feedback:
+            current_state['validation_feedback'] = f"Human review: {feedback}"
+        
+        # Create progress indicators
+        progress_bar = st.progress(90)
+        status_text = st.empty()
+        
+        if approval:
+            status_text.text("✅ Analysis approved by human reviewer!")
+            progress_bar.progress(95)
+            
+            # Return the final summary
+            final_result = current_state.get("final_summary", "")
+            
+            # Store enhanced metrics
+            chunk_metrics = []
+            if "chunk_results" in current_state:
+                for i, result in enumerate(current_state["chunk_results"]):
+                    chunk_info = {
+                        "chunk_number": i + 1,
+                        "success": not result.get("extracted_data", {}).get("error"),
+                        "metrics_count": len(result.get("extracted_data", {}).get("metrics", [])),
+                        "has_guidance": bool(result.get("extracted_data", {}).get("guidance")),
+                        "drivers_count": len(result.get("extracted_data", {}).get("key_drivers", [])),
+                        "risks_count": len(result.get("extracted_data", {}).get("risks", []))
+                    }
+                    chunk_metrics.append(chunk_info)
+            
+            st.session_state.transcript_analysis_metrics = {
+                "chunks_processed": len(current_state.get("chunks", [])),
+                "results_aggregated": len(current_state.get("chunk_results", [])),
+                "text_length": len(current_state.get("transcript_text", "")),
+                "summary_length": len(current_state.get("final_summary", "")),
+                "aggregated_data": current_state.get("aggregated_results", {}),
+                "chunk_details": chunk_metrics,
+                "rules_validation": current_state.get("rules_validation", {}),
+                "validation_feedback": current_state.get("validation_feedback", ""),
+                "human_approval": True
+            }
+            
+            progress_bar.progress(100)
+            status_text.text("✅ Analysis completed with human approval!")
+            
+            # Clear progress indicators
+            progress_bar.empty()
+            status_text.empty()
+            
+            return final_result
+        else:
+            status_text.text("❌ Analysis rejected by human reviewer")
+            progress_bar.progress(100)
+            
+            # Clear progress indicators
+            progress_bar.empty()
+            status_text.empty()
+            
+            return f"Analysis rejected: {feedback}"
+            
+    except Exception as e:
+        st.error(f"Error continuing analysis: {str(e)}")
+        return f"Error continuing analysis: {str(e)}"

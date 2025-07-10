@@ -6,6 +6,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chat_models import init_chat_model
 import json
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import interrupt
 import fitz  # PyMuPDF
 
 # Define the state for our map-reduce graph
@@ -19,6 +20,12 @@ class TranscriptMapReduceState(TypedDict):
     aggregated_results: Dict[str, Any]
     final_summary: str
     error: str
+    # Rules and human intervention
+    analysis_rules: str
+    rules_validation: Dict[str, Any]
+    human_approval: bool
+    validation_feedback: str
+    human_review_required: bool
 
 # New Node: Extract text from PDF
 def extract_pdf_text(state: TranscriptMapReduceState) -> TranscriptMapReduceState:
@@ -285,6 +292,145 @@ Keep the summary professional and to the point. Use bullet points for clarity.
     return {**state, "final_summary": final_summary}
 
 
+# Node 5: Validate rules
+def validate_rules(state: TranscriptMapReduceState) -> TranscriptMapReduceState:
+    """Validates the analysis results against user-defined rules."""
+    print("--- Step 5: Validating Analysis Against Rules ---")
+    
+    analysis_rules = state.get("analysis_rules", "")
+    if not analysis_rules or analysis_rules.strip() == "":
+        print("No rules specified, skipping validation.")
+        return {**state, "rules_validation": {"satisfied": True, "message": "No rules specified"}, "human_approval": True}
+    
+    final_summary = state.get("final_summary", "")
+    aggregated_results = state.get("aggregated_results", {})
+    
+    # Create a validation prompt
+    validation_prompt = f"""You are a financial analysis validator. Your task is to check if the analysis results satisfy the given rules.
+
+**Analysis Rules:**
+{analysis_rules}
+
+**Final Summary:**
+{final_summary}
+
+**Extracted Data:**
+```json
+{json.dumps(aggregated_results, indent=2)}
+```
+
+**Your Task:**
+Evaluate whether the analysis results satisfy each rule. For each rule:
+1. Check if it's satisfied based on the summary and extracted data
+2. Provide specific feedback on what's missing or needs improvement
+
+Respond in JSON format:
+{{
+    "overall_satisfaction": true/false,
+    "rule_assessments": [
+        {{ 
+            "rule": "Rule description",
+            "satisfied": true/false,
+            "feedback": "Specific feedback"
+        }}
+    ],
+    "recommendations": ["List of recommendations for improvement"]
+}}
+"""
+    
+    try:
+        model = init_chat_model("groq:llama3-8b-8192", temperature=0.1)
+        messages = [
+            SystemMessage(content="You are a financial analysis validator. Respond only in valid JSON format."),
+            HumanMessage(content=validation_prompt)
+        ]
+        
+        response = model.invoke(messages)
+        validation_result = json.loads(response.content)
+        
+        print(f"Rules validation complete. Overall satisfied: {validation_result.get('overall_satisfaction', False)}")
+        
+        return {
+            **state, 
+            "rules_validation": validation_result,
+            "human_approval": validation_result.get("overall_satisfaction", False)
+        }
+        
+    except Exception as e:
+        print(f"Error during rules validation: {e}")
+        return {
+            **state, 
+            "rules_validation": {
+                "satisfied": False, 
+                "message": f"Validation error: {str(e)}"
+            },
+            "human_approval": False
+        }
+
+
+# Node 6: Human interrupt for approval using proper LangGraph interrupt
+def human_interrupt(state: TranscriptMapReduceState) -> TranscriptMapReduceState:
+    """Pauses for human review when rules are not satisfied using LangGraph interrupt."""
+    print("--- Step 6: Human Review Required ---")
+    
+    rules_validation = state.get("rules_validation", {})
+    human_approval = state.get("human_approval", False)
+    
+    if human_approval:
+        print("Analysis passed all rules. No human intervention needed.")
+        return {**state, "validation_feedback": "Analysis approved automatically."}
+    
+    print("Analysis did not satisfy all rules. Human review required.")
+    
+    # Prepare validation message for human review
+    validation_message = "Analysis requires human review:\n\n"
+    
+    if "rule_assessments" in rules_validation:
+        validation_message += "**Rules Assessment:**\n"
+        for assessment in rules_validation["rule_assessments"]:
+            status = "✅" if assessment.get("satisfied", True) else "❌"
+            validation_message += f"{status} {assessment.get('rule', 'Unknown rule')}: {assessment.get('feedback', 'No feedback')}\n"
+    
+    if "recommendations" in rules_validation:
+        validation_message += f"\n**Recommendations:**\n"
+        for rec in rules_validation['recommendations']:
+            validation_message += f"• {rec}\n"
+    
+    validation_message += "\n**Analysis Summary:**\n"
+    validation_message += state.get("final_summary", "No summary available")
+    
+    # For Streamlit UI integration, we'll set a special flag to indicate human review is needed
+    # and return the state with validation details for the UI to handle
+    return {
+        **state, 
+        "validation_feedback": validation_message,
+        "human_review_required": True,
+        "human_approval": False  # Will be updated by UI
+    }
+
+
+# Conditional function to determine if human approval is needed
+def should_require_human_approval(state: TranscriptMapReduceState) -> str:
+    """Determines if human approval is required based on rules validation."""
+    human_approval = state.get("human_approval", False)
+    
+    if human_approval:
+        return "finalize"
+    else:
+        return "human_interrupt"
+
+
+# Node 7: Finalize analysis
+def finalize_analysis(state: TranscriptMapReduceState) -> TranscriptMapReduceState:
+    """Final step to complete the analysis."""
+    print("--- Step 7: Analysis Complete ---")
+    
+    return {
+        **state,
+        "validation_feedback": state.get("validation_feedback", "Analysis completed successfully.")
+    }
+
+
 # Create the graph
 def create_transcript_mapreduce_graph():
     """Creates and compiles the map-reduce graph for transcript analysis."""
@@ -296,13 +442,21 @@ def create_transcript_mapreduce_graph():
     workflow.add_node("map_phase", map_phase)
     workflow.add_node("reduce_aggregator", reduce_phase_aggregator)
     workflow.add_node("generate_summary", generate_final_summary)
-    
+    workflow.add_node("validate_rules", validate_rules)
+    workflow.add_node("human_interrupt", human_interrupt)
+    workflow.add_node("finalize_analysis", finalize_analysis)
     workflow.add_edge(START, "extract_pdf_text")
     workflow.add_edge("extract_pdf_text", "chunk_document")
     workflow.add_edge("chunk_document", "map_phase")
     workflow.add_edge("map_phase", "reduce_aggregator")
     workflow.add_edge("reduce_aggregator", "generate_summary")
-    workflow.add_edge("generate_summary", END)
+    workflow.add_edge("generate_summary", "validate_rules")
+    workflow.add_conditional_edges("validate_rules", should_require_human_approval, {
+        "human_interrupt": "human_interrupt",
+        "finalize": "finalize_analysis"
+    })
+    workflow.add_edge("human_interrupt", "finalize_analysis")
+    workflow.add_edge("finalize_analysis", END)
     
     # Compile the graph with memory to allow for streaming intermediate steps.
     app = workflow.compile(checkpointer=MemorySaver())
@@ -311,16 +465,31 @@ def create_transcript_mapreduce_graph():
     return app
 
 # New function to be called from the API
-async def analyze_transcript(file_path: str, thread_id: str):
+async def analyze_transcript(file_path: str, thread_id: str, analysis_rules: str = ""):
     """
     Main entry point to run the transcript analysis graph.
     This is an async generator that yields the state at each step.
     """
     graph = create_transcript_mapreduce_graph()
     config = {"configurable": {"thread_id": thread_id}}
+      # Initialize state with rules
+    initial_state = {
+        "file_path": file_path,
+        "analysis_rules": analysis_rules,
+        "transcript_text": "",
+        "chunks": [],
+        "chunk_results": [],
+        "aggregated_results": {},
+        "final_summary": "",
+        "error": "",
+        "rules_validation": {},
+        "human_approval": False,
+        "validation_feedback": "",
+        "human_review_required": False
+    }
     
     async for state in graph.astream(
-        {"file_path": file_path},
+        initial_state,
         config=config,
         stream_mode="values"
     ):
