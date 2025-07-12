@@ -15,6 +15,7 @@ try:
     from document_upload_qa import show_document_summarizer as show_document_upload_qa, initialize_document_summarizer_session as init_upload_qa
     from table_extraction import show_table_extraction, initialize_table_extraction_session
     from transcript_analysis import show_transcript_analysis, initialize_transcript_analysis_session
+    from simple_calculator import show_simple_calculator
 except ImportError as e:
     st.error(f"Import error: {e}")
     st.stop()
@@ -375,12 +376,17 @@ def create_premium_navigation():
             "title": "Table Extraction",
             "description": "Extract Tables from PDFs",
             "key": "Table Extraction"
-        },
-        {
+        },        {
             "icon": "🎯", 
             "title": "Transcript Analysis",
             "description": "AI-Powered Financial Insights",
             "key": "Transcript Analysis"
+        },
+        {
+            "icon": "🧮", 
+            "title": "Simple Calculator",
+            "description": "LangGraph Demo with Human Interrupts",
+            "key": "Simple Calculator"
         }
     ]
     
@@ -884,6 +890,8 @@ def main():
         show_table_extraction()
     elif st.session_state.current_page == "Transcript Analysis":
         show_transcript_analysis()
+    elif st.session_state.current_page == "Simple Calculator":
+        show_simple_calculator()
         
         # Enhanced debug console
         if show_debug:

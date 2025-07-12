@@ -6,7 +6,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+checkpoints/
+*.db*
 docs
 extracted_images
 extracted_tables

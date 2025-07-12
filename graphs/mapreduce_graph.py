@@ -2,6 +2,7 @@ import asyncio
 from typing import TypedDict, Annotated, List, Dict, Any
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chat_models import init_chat_model
 import json
@@ -26,6 +27,76 @@ class TranscriptMapReduceState(TypedDict):
     human_approval: bool
     validation_feedback: str
     human_review_required: bool
+
+# Define prompt templates for different stages
+FINANCIAL_EXTRACTION_TEMPLATE = PromptTemplate.from_template("""You are an expert financial analyst. Your task is to extract key financial metrics, insights, and forward-looking statements from the provided text chunk of an earnings call transcript.
+
+Focus on the following:
+- **Key Financial Metrics**: Revenue, Net Income, EPS, Margins, etc.
+- **Guidance/Outlook**: Any forward-looking statements about future performance.
+- **Key Business Drivers**: What is driving performance? New products, market trends, etc.
+- **Risks and Challenges**: Any mentioned risks or headwinds.
+- **Management Tone**: Is the tone optimistic, cautious, or pessimistic?
+
+Present the extracted information in a structured JSON format. For example:
+{{
+  "metrics": [{{"name": "Revenue", "value": "10B", "period": "Q4 2024"}}],
+  "guidance": "Company expects 10% revenue growth in the next quarter.",
+  "key_drivers": ["Strong cloud segment growth", "New AI product adoption"],
+  "risks": ["Macroeconomic uncertainty", "Supply chain constraints"],
+  "tone": "Optimistic"
+}}
+
+**Text chunk to analyze:**
+{chunk_text}""")
+
+SUMMARY_GENERATION_TEMPLATE = PromptTemplate.from_template("""You are a senior financial analyst. Your task is to synthesize the extracted financial information into a concise, easy-to-read summary.
+The information was extracted from a long earnings call transcript. Focus on the most critical insights.
+
+**Extracted Information:**
+```json
+{aggregated_data}
+```
+
+**Your Task:**
+Generate a final summary covering the following points:
+1. **Overall Performance**: A brief overview of the company's performance in the quarter.
+2. **Key Financial Highlights**: List the most important metrics (e.g., Revenue, EPS).
+3. **Future Outlook**: Summarize the company's guidance and future expectations.
+4. **Key Themes**: Mention the main business drivers and risks discussed.
+
+Keep the summary professional and to the point. Use bullet points for clarity.""")
+
+RULES_VALIDATION_TEMPLATE = PromptTemplate.from_template("""You are a financial analysis validator. Your task is to check if the analysis results satisfy the given rules.
+
+**Analysis Rules:**
+{analysis_rules}
+
+**Final Summary:**
+{final_summary}
+
+**Extracted Data:**
+```json
+{aggregated_results}
+```
+
+**Your Task:**
+Evaluate whether the analysis results satisfy each rule. For each rule:
+1. Check if it's satisfied based on the summary and extracted data
+2. Provide specific feedback on what's missing or needs improvement
+
+Respond in JSON format:
+{{
+    "overall_satisfaction": true/false,
+    "rule_assessments": [
+        {{ 
+            "rule": "Rule description",
+            "satisfied": true/false,
+            "feedback": "Specific feedback"
+        }}
+    ],
+    "recommendations": ["List of recommendations for improvement"]
+}}""")
 
 # New Node: Extract text from PDF
 def extract_pdf_text(state: TranscriptMapReduceState) -> TranscriptMapReduceState:
@@ -85,29 +156,13 @@ async def map_phase_extractor(chunk: str) -> Dict[str, Any]:
     """
     print(f"--- Step 2: Processing Chunk (Map Phase) ---")
     
-    system_prompt = """You are an expert financial analyst. Your task is to extract key financial metrics, insights, and forward-looking statements from the provided text chunk of an earnings call transcript.
-
-Focus on the following:
-- **Key Financial Metrics**: Revenue, Net Income, EPS, Margins, etc.
-- **Guidance/Outlook**: Any forward-looking statements about future performance.
-- **Key Business Drivers**: What is driving performance? New products, market trends, etc.
-- **Risks and Challenges**: Any mentioned risks or headwinds.
-- **Management Tone**: Is the tone optimistic, cautious, or pessimistic?
-
-Present the extracted information in a structured JSON format. For example:
-{
-  "metrics": [{"name": "Revenue", "value": "10B", "period": "Q4 2024"}],
-  "guidance": "Company expects 10% revenue growth in the next quarter.",
-  "key_drivers": ["Strong cloud segment growth", "New AI product adoption"],
-  "risks": ["Macroeconomic uncertainty", "Supply chain constraints"],
-  "tone": "Optimistic"
-}
-"""
+    # Use the prompt template
+    prompt = FINANCIAL_EXTRACTION_TEMPLATE.invoke({"chunk_text": chunk})
     
     model = init_chat_model("groq:llama3-8b-8192", temperature=0.1)
     messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=chunk)
+        SystemMessage(content="You are an expert financial analyst. Respond only in valid JSON format."),
+        HumanMessage(content=prompt.text)
     ]
     
     try:
@@ -152,29 +207,13 @@ async def map_phase_extractor_with_progress(chunk: str, chunk_number: int, total
     """
     print(f"🔍 Processing chunk {chunk_number}/{total_chunks} (Map Phase)")
     
-    system_prompt = """You are an expert financial analyst. Your task is to extract key financial metrics, insights, and forward-looking statements from the provided text chunk of an earnings call transcript.
-
-Focus on the following:
-- **Key Financial Metrics**: Revenue, Net Income, EPS, Margins, etc.
-- **Guidance/Outlook**: Any forward-looking statements about future performance.
-- **Key Business Drivers**: What is driving performance? New products, market trends, etc.
-- **Risks and Challenges**: Any mentioned risks or headwinds.
-- **Management Tone**: Is the tone optimistic, cautious, or pessimistic?
-
-Present the extracted information in a structured JSON format. For example:
-{
-  "metrics": [{"name": "Revenue", "value": "10B", "period": "Q4 2024"}],
-  "guidance": "Company expects 10% revenue growth in the next quarter.",
-  "key_drivers": ["Strong cloud segment growth", "New AI product adoption"],
-  "risks": ["Macroeconomic uncertainty", "Supply chain constraints"],
-  "tone": "Optimistic"
-}
-"""
+    # Use the prompt template
+    prompt = FINANCIAL_EXTRACTION_TEMPLATE.invoke({"chunk_text": chunk})
     
     model = init_chat_model("groq:llama3-8b-8192", temperature=0.1)
     messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=chunk)
+        SystemMessage(content="You are an expert financial analyst. Respond only in valid JSON format."),
+        HumanMessage(content=prompt.text)
     ]
     
     try:
@@ -260,28 +299,15 @@ def generate_final_summary(state: TranscriptMapReduceState) -> TranscriptMapRedu
     if not aggregated_data:
         return {**state, "error": "No aggregated data to summarize."}
 
-    summary_prompt = f"""You are a senior financial analyst. Your task is to synthesize the extracted financial information into a concise, easy-to-read summary.
-The information was extracted from a long earnings call transcript. Focus on the most critical insights.
-
-**Extracted Information:**
-```json
-{json.dumps(aggregated_data, indent=2)}
-```
-
-**Your Task:**
-Generate a final summary covering the following points:
-1.  **Overall Performance**: A brief overview of the company's performance in the quarter.
-2.  **Key Financial Highlights**: List the most important metrics (e.g., Revenue, EPS).
-3.  **Future Outlook**: Summarize the company's guidance and future expectations.
-4.  **Key Themes**: Mention the main business drivers and risks discussed.
-
-Keep the summary professional and to the point. Use bullet points for clarity.
-"""
+    # Use the prompt template
+    prompt = SUMMARY_GENERATION_TEMPLATE.invoke({
+        "aggregated_data": json.dumps(aggregated_data, indent=2)
+    })
     
     model = init_chat_model("groq:llama3-8b-8192", temperature=0.3)
     messages = [
         SystemMessage(content="You are a senior financial analyst creating a summary."),
-        HumanMessage(content=summary_prompt)
+        HumanMessage(content=prompt.text)
     ]
     
     response = model.invoke(messages)
@@ -305,44 +331,18 @@ def validate_rules(state: TranscriptMapReduceState) -> TranscriptMapReduceState:
     final_summary = state.get("final_summary", "")
     aggregated_results = state.get("aggregated_results", {})
     
-    # Create a validation prompt
-    validation_prompt = f"""You are a financial analysis validator. Your task is to check if the analysis results satisfy the given rules.
-
-**Analysis Rules:**
-{analysis_rules}
-
-**Final Summary:**
-{final_summary}
-
-**Extracted Data:**
-```json
-{json.dumps(aggregated_results, indent=2)}
-```
-
-**Your Task:**
-Evaluate whether the analysis results satisfy each rule. For each rule:
-1. Check if it's satisfied based on the summary and extracted data
-2. Provide specific feedback on what's missing or needs improvement
-
-Respond in JSON format:
-{{
-    "overall_satisfaction": true/false,
-    "rule_assessments": [
-        {{ 
-            "rule": "Rule description",
-            "satisfied": true/false,
-            "feedback": "Specific feedback"
-        }}
-    ],
-    "recommendations": ["List of recommendations for improvement"]
-}}
-"""
+    # Use the prompt template
+    prompt = RULES_VALIDATION_TEMPLATE.invoke({
+        "analysis_rules": analysis_rules,
+        "final_summary": final_summary,
+        "aggregated_results": json.dumps(aggregated_results, indent=2)
+    })
     
     try:
         model = init_chat_model("groq:llama3-8b-8192", temperature=0.1)
         messages = [
             SystemMessage(content="You are a financial analysis validator. Respond only in valid JSON format."),
-            HumanMessage(content=validation_prompt)
+            HumanMessage(content=prompt.text)
         ]
         
         response = model.invoke(messages)

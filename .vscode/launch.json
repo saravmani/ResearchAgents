@@ -22,7 +22,7 @@
             "module": "streamlit",
             "args": [
                 "run",
-                "${workspaceFolder}/ui/main_app_premium.py",
+                "${workspaceFolder}/ui/human_loop_simple_ui.py",
                 "--server.port",
                 "8502",
                 "--server.headless",
