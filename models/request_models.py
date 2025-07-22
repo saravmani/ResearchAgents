@@ -114,3 +114,31 @@ class TranscriptAnalysisRequest(BaseModel):
         default="default-transcript",
         description="Unique identifier for the transcript analysis thread."
     )
+
+
+class ExcelDataExtractionRequest(BaseModel):
+    """
+    Request model for Excel data extraction using Vision AI
+    
+    Attributes:
+        excel_file_path (str): Path to the Excel file to analyze
+        thread_id (str): Unique identifier for the conversation thread
+    """
+    excel_file_path: str = Field(
+        ..., 
+        description="Path to the Excel file containing table data to extract using Vision AI",
+        example="data/financial_reports/quarterly_data.xlsx"
+    )
+    
+    thread_id: str = Field(
+        default="excel-vision-extraction", 
+        description="Unique identifier for the conversation thread"
+    )
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "excel_file_path": "data/financial_reports/quarterly_data.xlsx",
+                "thread_id": "excel_vision_analysis_123"
+            }
+        }

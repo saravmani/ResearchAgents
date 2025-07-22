@@ -14,6 +14,7 @@ class MapReduceState(TypedDict):
     # The 'mapped_results' will be populated by the parallel mapper node all at once.
     mapped_results: List[str]
     final_summary: str
+    status: str  # To hold real-time status updates
     error: str
 
 # --- Prompts ---
@@ -60,7 +61,10 @@ async def parallel_mapper_node(state: MapReduceState) -> MapReduceState:
     tasks = [get_response_for_prompt(p) for p in prompts]
     mapped_results = await asyncio.gather(*tasks)
     
-    return {"mapped_results": mapped_results}
+    return {
+        "mapped_results": mapped_results,
+        "status": f"Successfully mapped all {len(prompts)} prompts."
+    }
 
 def reduce_node(state: MapReduceState) -> MapReduceState:
     """Aggregates the mapped results into a final summary."""
@@ -70,7 +74,10 @@ def reduce_node(state: MapReduceState) -> MapReduceState:
     final_summary = "## Financial Analysis Report\n\n"
     final_summary += "\n\n---\n\n".join(mapped_results)
     
-    return {"final_summary": final_summary}
+    return {
+        "final_summary": final_summary,
+        "status": "Analysis complete. Final summary generated."
+    }
 
 # --- Graph Definition ---
 def create_map_reduce_graph():
@@ -113,6 +120,7 @@ async def run_map_reduce_analysis(doc_path: str, thread_id: str):
         "document": document_content,
         "prompts": list(PROMPT_DICT.values()),
         "mapped_results": [],
+        "status": "Starting analysis...",
     }
 
     # Stream the graph execution. The graph itself now handles the parallel mapping.

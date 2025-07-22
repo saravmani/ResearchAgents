@@ -22,7 +22,7 @@
             "module": "streamlit",
             "args": [
                 "run",
-                "${workspaceFolder}/ui/map_reduce_analysis_ui.py",
+                "${workspaceFolder}/ui/main_app.py",
                 "--server.port",
                 "8502",
                 "--server.headless",

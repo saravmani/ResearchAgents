@@ -11,6 +11,7 @@ sys.path.append(current_dir)
 # Import page modules
 from ui.home_page import show_home_page
 from ui.document_summarizer import show_document_summarizer, initialize_document_summarizer_session
+from ui.excel_data_extraction import excel_data_extraction_ui
 
 # Configure Streamlit page
 st.set_page_config(
@@ -34,12 +35,11 @@ def main():
     with st.sidebar:
         st.title("🤖 Research Agents")
         st.markdown("---")
-        
-        # Navigation menu
+          # Navigation menu
         page = st.radio(
             "Navigation",
-            ["Home", "Document Summarizer"],
-            index=0 if st.session_state.current_page == "Home" else 1
+            ["Home", "Document Summarizer", "Excel Vision Extraction"],
+            index=["Home", "Document Summarizer", "Excel Vision Extraction"].index(st.session_state.current_page) if st.session_state.current_page in ["Home", "Document Summarizer", "Excel Vision Extraction"] else 0
         )
         
         # Update current page
@@ -79,13 +79,13 @@ def main():
         st.markdown("### ℹ️ Platform Info")
         st.caption("Version: 1.0.0")
         st.caption("Environment: Production")
-        st.caption("Status: 🟢 Online")
-    
-    # Display the selected page
+        st.caption("Status: 🟢 Online")    # Display the selected page
     if st.session_state.current_page == "Home":
         show_home_page()
     elif st.session_state.current_page == "Document Summarizer":
         show_document_summarizer()
+    elif st.session_state.current_page == "Excel Vision Extraction":
+        excel_data_extraction_ui()
         
         # Debug information for document summarizer
         if show_debug and st.session_state.current_page == "Document Summarizer":

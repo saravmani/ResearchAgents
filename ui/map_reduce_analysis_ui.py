@@ -53,20 +53,26 @@ def main():
             # --- Run Analysis ---
             async def run_analysis():
                 progress_bar = st.progress(0, "Starting analysis...")
+                status_text = st.empty()
                 try:
-                    i = 0
                     async for state in run_map_reduce_analysis(doc_path, st.session_state.thread_id):
                         if "error" in state and state["error"]:
                             st.session_state.error = state["error"]
+                            status_text.error(state["error"])
                             break
-                        if "mapped_results" in state:
-                            st.session_state.mapped_results.extend(state["mapped_results"])
-                            progress = int((i + 1) / 3 * 80)
-                            progress_bar.progress(progress, f"Mapping prompt {i+1}/3...")
-                            i += 1
+                        
+                        if "status" in state:
+                            status_text.info(state["status"])
+
+                        if "mapped_results" in state and state["mapped_results"]:
+                            st.session_state.mapped_results = state["mapped_results"]
+                            progress_bar.progress(80, "Mapping complete. Reducing results...")
+                        
                         if "final_summary" in state and state["final_summary"]:
                             st.session_state.final_summary = state["final_summary"]
                             progress_bar.progress(100, "Analysis complete!")
+                            status_text.success("Analysis complete!")
+
                     st.session_state.analysis_complete = True
                 except Exception as e:
                     st.session_state.error = str(e)
@@ -91,6 +97,7 @@ def main():
         # Display mapped results as they come in
         if st.session_state.mapped_results:
             st.subheader("Intermediate Mapped Results")
+            # Since all results come at once, we just display them
             for i, result in enumerate(st.session_state.mapped_results):
                 with st.expander(f"Result from Prompt {i+1}", expanded=True):
                     st.markdown(result)

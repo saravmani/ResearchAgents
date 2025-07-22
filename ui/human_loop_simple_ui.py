@@ -40,16 +40,15 @@ def run_initial_analysis():
     st.session_state.conversation_output = []
     
     try:
-        with st.spinner("Running analysis..."):
-            for event in app.stream(
-                {"messages": [("user", "Ask the user where they are, then look up the weather there")]}, 
-                config, 
-                stream_mode="values"
-            ):
-                if "messages" in event:
-                    message = event["messages"][-1]
-                    st.session_state.conversation_output.append(f"**{message.type}:** {message.content}")
-        
+        for event in app.stream(
+            {"messages": [("user", "Ask the user where they are, then look up the weather there")]}, 
+            config, 
+            stream_mode="values"
+        ):
+            if "messages" in event:
+                message = event["messages"][-1]
+                st.session_state.conversation_output.append(f"**{message.type}:** {message.content}")
+    
         # If we reach here without interrupt, analysis is complete
         st.session_state.analysis_complete = True
         st.session_state.analysis_started = True
