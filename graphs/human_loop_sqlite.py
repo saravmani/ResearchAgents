@@ -69,8 +69,8 @@ def ask_human(state):
     print("Asking human for input...")
     # tool_call_id = state["messages"][-1].tool_calls[0]["id"]
     tool_call_id = state["messages"][-1].id
-    ask = AskHuman.model_validate(state["messages"][-1])
-    location = interrupt(ask.question)
+    # ask = AskHuman.model_validate(state["messages"][-1])
+    location = interrupt("some question to ask the human")
     tool_message = [{"tool_call_id": tool_call_id, "type": "tool", "content": location}]
     return {"messages": tool_message}
 

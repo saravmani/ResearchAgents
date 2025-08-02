@@ -1,0 +1,129 @@
+import streamlit as st
+from langchain_core.tools import tool
+from typing import Annotated, List, Tuple, Union
+from typing_extensions import TypedDict
+from langchain_core.messages import BaseMessage, FunctionMessage, HumanMessage
+
+from langgraph.graph import END, StateGraph
+from langgraph.prebuilt.tool_executor import ToolExecutor, ToolInvocation
+
+
+# Define the state of our graph
+class AgentState(TypedDict):
+    messages: Annotated[list[BaseMessage], lambda x: x]
+
+
+# Define a tool that a human can provide input to
+@tool
+def human_input_tool(question: str) -> str:
+    """Gets input from a human.  """
+    st.session_state.human_in_loop_query = question
+    st.session_state.langgraph_interrupted = True
+    return st.session_state.human_input_response
+
+
+# Define our LLM
+from langchain_openai import ChatOpenAI
+
+llm = ChatOpenAI(model="gpt-4-0125-preview", streaming=True)
+
+# Bind the tools to the LLM
+llm_with_tools = llm.bind_tools([human_input_tool])
+
+
+# Define the agent node
+def agent_node(state: AgentState):
+    response = llm_with_tools.invoke(state["messages"])
+    return {"messages": [response]}
+
+
+# Define the tool node
+def tool_node(state: AgentState):
+    tool_input = state["messages"][-1].tool_calls[0].args
+    # Assuming only one tool call for simplicity
+    if "human_input_tool" == state["messages"][-1].tool_calls[0].name:
+        tool_output = human_input_tool.invoke(tool_input)  # Simulate a human input
+        st.session_state.human_input_tool_active = True
+        return {"messages": [FunctionMessage(content=str(tool_output), name="human_input_tool")]}
+    else:
+        #  If there are other tools, they would be executed here.
+        pass
+
+
+# Define the router
+def router(state: AgentState):
+    if state["messages"][-1].tool_calls:
+        return "tool"
+    else:
+        return "end"
+
+
+# Build the graph
+workflow = StateGraph(AgentState)
+
+workflow.add_node("agent", agent_node)
+workflow.add_node("tool", tool_node)
+
+workflow.set_entry_point("agent")
+
+workflow.add_conditional_edges("agent", router, {"tool": "tool", "end": END})
+workflow.add_edge("tool", "agent")
+
+app = workflow.compile()
+
+
+# Streamlit UI
+st.set_page_config(page_title="LangGraph Human-in-the-Loop")
+st.title("LangGraph Human-in-the-Loop Example")
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "langgraph_interrupted" not in st.session_state:
+    st.session_state.langgraph_interrupted = False
+if "human_in_loop_query" not in st.session_state:
+    st.session_state.human_in_loop_query = ""
+if "human_input_response" not in st.session_state:
+    st.session_state.human_input_response = ""
+if "human_input_tool_active" not in st.session_state:
+    st.session_state.human_input_tool_active = False
+
+
+for message in st.session_state.messages:
+    with st.chat_message(message.type):
+        st.markdown(message.content)
+
+
+if st.session_state.langgraph_interrupted:
+    with st.chat_message("user"):
+        st.write(f"Human intervention required: {st.session_state.human_in_loop_query}")
+        user_input_for_tool = st.text_input("Your input:", key="tool_input_text")
+        if st.button("Submit Human Input"):
+            st.session_state.human_input_response = user_input_for_tool
+            st.session_state.langgraph_interrupted = False
+            st.session_state.human_input_tool_active = False # Reset for next use
+            # Resume the graph with the human's response
+            for event in app.stream({"messages": [HumanMessage(content=user_input_for_tool)]}, stream_mode="values"):
+                if "messages" in event:
+                    st.session_state.messages.append(event["messages"][-1])
+            st.rerun()
+
+else:
+    if prompt := st.chat_input("Enter your message"):
+        st.session_state.messages.append(HumanMessage(content=prompt))
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Call LangGraph
+        for event in app.stream({"messages": st.session_state.messages}, stream_mode="values"):
+            if "messages" in event:
+                st.session_state.messages.append(event["messages"][-1])
+            if st.session_state.langgraph_interrupted:
+                break # Exit loop if human intervention is needed
+
+        # Display the AI's response if the graph wasn't interrupted by the human_input_tool
+        if not st.session_state.human_input_tool_active:
+            if st.session_state.messages:
+                last_message = st.session_state.messages[-1]
+                if last_message.type == "ai":
+                    with st.chat_message("assistant"):
+                        st.markdown(last_message.content)
